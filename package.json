@@ -8,7 +8,7 @@
     "dev:client": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "npm run db:push && node dist/server/server/index.js",
-    "db:push": "drizzle-kit push",
+    "db:push": "drizzle-kit push --force",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
