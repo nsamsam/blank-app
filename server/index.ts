@@ -21,7 +21,7 @@ setupRoutes(app);
 
 // Serve static files in production
 if (process.env.NODE_ENV === "production") {
-  const publicDir = path.join(__dirname, "../public");
+  const publicDir = path.join(__dirname, "../../public");
   app.use(express.static(publicDir));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
