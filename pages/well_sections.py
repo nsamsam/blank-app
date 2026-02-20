@@ -130,13 +130,32 @@ def _load_survey_arrays(well_id: int):
     finally:
         session.close()
 
-    if not rows or "MD (ft)" not in cols or "TVD (ft)" not in cols:
+    if not rows:
+        return None, None
+
+    # Find the actual key names used in the row dicts (handles minor mismatches)
+    sample = rows[0] if rows else {}
+    md_key = tvd_key = None
+    for k in sample.keys():
+        kl = k.lower().strip()
+        if kl.startswith("md") and "ft" in kl:
+            md_key = k
+        elif kl.startswith("tvd") and "ft" in kl and "ss" not in kl:
+            tvd_key = k
+
+    # Fallback to exact column names from the columns list
+    if md_key is None:
+        md_key = "MD (ft)" if "MD (ft)" in cols else None
+    if tvd_key is None:
+        tvd_key = "TVD (ft)" if "TVD (ft)" in cols else None
+
+    if md_key is None or tvd_key is None:
         return None, None
 
     md_list, tvd_list = [], []
     for row in rows:
-        md_val = row.get("MD (ft)")
-        tvd_val = row.get("TVD (ft)")
+        md_val = row.get(md_key)
+        tvd_val = row.get(tvd_key)
         try:
             md_list.append(float(md_val))
             tvd_list.append(float(tvd_val))
@@ -154,15 +173,18 @@ def _tvd_to_md(tvd_value: float, md_arr, tvd_arr) -> float | None:
 
     Finds the closest station above (TVD1, MD1) and below (TVD2, MD2) and applies:
         MD = MD1 + (TVD_target - TVD1) / (TVD2 - TVD1) * (MD2 - MD1)
+
+    If target TVD is outside the survey range, extrapolates using the
+    nearest two survey stations.
     """
     if md_arr is None or tvd_arr is None or len(md_arr) < 2:
         return None
 
     n = len(tvd_arr)
 
-    # Exact match
+    # Exact match (with small tolerance for float comparison)
     for i in range(n):
-        if tvd_arr[i] == tvd_value:
+        if abs(tvd_arr[i] - tvd_value) < 0.01:
             return float(md_arr[i])
 
     # Find the bracketing pair: last station with TVD <= target, first with TVD >= target
@@ -177,8 +199,18 @@ def _tvd_to_md(tvd_value: float, md_arr, tvd_arr) -> float | None:
             if idx_below is None or tvd_arr[i] <= tvd_arr[idx_below]:
                 idx_below = i
 
-    if idx_above is None or idx_below is None:
+    # Handle out-of-range: extrapolate using the two nearest stations
+    if idx_above is None and idx_below is not None:
+        # TVD is shallower than entire survey — use the first two points
+        idx_above = 0
+        idx_below = 1 if n > 1 else 0
+    elif idx_below is None and idx_above is not None:
+        # TVD is deeper than entire survey — use the last two points
+        idx_below = n - 1
+        idx_above = n - 2 if n > 1 else n - 1
+    elif idx_above is None and idx_below is None:
         return None
+
     if idx_above == idx_below:
         return float(md_arr[idx_above])
 
@@ -207,6 +239,15 @@ def render(well_name: str = "Well 1"):
     # Pre-load directional survey for TVD→MD interpolation
     md_arr, tvd_arr = _load_survey_arrays(well_id)
     has_survey = md_arr is not None
+
+    if has_survey:
+        st.caption(
+            f"Directional survey loaded ({len(md_arr)} stations, "
+            f"TVD range: {tvd_arr.min():.0f} – {tvd_arr.max():.0f} ft). "
+            "MD will auto-calculate from TVD."
+        )
+    else:
+        st.warning("No directional survey found for this well. Load one in the **Directional** tab so MD can auto-calculate from TVD.")
 
     if st.button("+ Add Section", type="primary"):
         existing = _load_sections(well_id)
