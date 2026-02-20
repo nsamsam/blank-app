@@ -20,7 +20,12 @@ declare global {
 
 export function setupAuth(app: Express) {
   const PgSession = connectPgSimple(session);
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: false,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+  });
 
   app.use(
     session({
