@@ -21,11 +21,10 @@ _DESIGN_FIELDS = [
 # DB helpers
 # ------------------------------------------------------------------
 
-def _get_well_id(well_name: str) -> int | None:
+def _get_well(well_name: str) -> Well | None:
     session = SessionLocal()
     try:
-        well = session.query(Well).filter_by(name=well_name).first()
-        return well.id if well else None
+        return session.query(Well).filter_by(name=well_name).first()
     finally:
         session.close()
 
@@ -255,10 +254,12 @@ def _calc_tension(prefix: str, csg_wt: float | None, shoe_md: float | None,
 # ------------------------------------------------------------------
 
 def render(well_name: str = "Well 1"):
-    well_id = _get_well_id(well_name)
-    if well_id is None:
+    well = _get_well(well_name)
+    if well is None:
         st.warning("Well not found.")
         return
+    well_id = well.id
+    well_water_depth = well.water_depth or ""
 
     st.subheader("Casing Design Check")
 
@@ -314,6 +315,10 @@ def render(well_name: str = "Well 1"):
         fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
         if fg_val is not None:
             st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
+
+    # Auto-fill Water Depth from Well Info
+    if well_water_depth:
+        st.session_state[f"{prefix}_tvd_sw"] = well_water_depth
 
     # Auto-fill TOC from well sections
     section_toc = section.toc or ""
@@ -401,7 +406,8 @@ def render(well_name: str = "Well 1"):
             st.text_input("Lead Cement Interval (ft)", key=f"{prefix}_tvd_lead",
                           disabled=True, help="Auto: TOC − Tail Cement Interval")
             st.text_input("Water Depth (ft)", key=f"{prefix}_tvd_sw", on_change=save,
-                          help="Water depth above cement")
+                          disabled=bool(well_water_depth),
+                          help="Auto from Well Info" if well_water_depth else "Enter manually or set in Well Info")
 
         # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
