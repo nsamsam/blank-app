@@ -28,30 +28,11 @@ DIRECTIONAL_COLUMNS = [
     "TR (°/100ft)",
 ]
 
-_HEADER_LINE = "\t".join(DIRECTIONAL_COLUMNS)
 _SAMPLE_HINT = (
-    f"{_HEADER_LINE}\n"
     "0\t0.00\t0.00\t0\t-100\t0\t0\t0\t\t\t\t\t\t\t\n"
     "500\t1.50\t45.00\t500\t400\t10\t7\t7\t\t\t\t\t0.30\t\t"
 )
 
-
-def _normalize_col(name: str) -> str:
-    """Lowercase + strip for fuzzy column matching."""
-    return name.strip().lower()
-
-
-def _match_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Try to map pasted columns to the expected directional columns."""
-    norm_map = {_normalize_col(c): c for c in DIRECTIONAL_COLUMNS}
-    rename = {}
-    for col in df.columns:
-        normed = _normalize_col(col)
-        if normed in norm_map:
-            rename[col] = norm_map[normed]
-    if rename:
-        df = df.rename(columns=rename)
-    return df
 
 
 # ------------------------------------------------------------------
@@ -145,10 +126,10 @@ def render(well_name: str = "Well 1"):
     has_data = data_key in st.session_state and st.session_state[data_key] is not None
     with st.expander("Input Data", expanded=not has_data):
         st.caption(
-            "Paste tab-separated data from Excel. "
-            "Columns: **MD (ft)** (required) plus any of: "
-            + ", ".join(DIRECTIONAL_COLUMNS[1:])
-            + ". Leave columns blank if not available."
+            "Paste tab-separated data from Excel — **no header row needed**. "
+            "Columns are assigned in order: "
+            + ", ".join(DIRECTIONAL_COLUMNS)
+            + ". Leave trailing columns blank if not available."
         )
         pasted = st.text_area(
             "Paste data here",
@@ -159,16 +140,15 @@ def render(well_name: str = "Well 1"):
         if st.button("Load Data", key=f"{prefix}_dir_load"):
             if pasted.strip():
                 try:
-                    df = pd.read_csv(StringIO(pasted), sep="\t")
-                    df = _match_columns(df)
-
-                    # Validate MD column exists
-                    if "MD (ft)" not in df.columns:
+                    df = pd.read_csv(StringIO(pasted), sep="\t", header=None)
+                    num_cols = df.shape[1]
+                    if num_cols > len(DIRECTIONAL_COLUMNS):
                         st.error(
-                            "Could not find an **MD (ft)** column. "
-                            "Make sure the first column header is 'MD (ft)'."
+                            f"Pasted data has {num_cols} columns but only "
+                            f"{len(DIRECTIONAL_COLUMNS)} are expected."
                         )
                     else:
+                        df.columns = DIRECTIONAL_COLUMNS[:num_cols]
                         for col in df.columns:
                             df[col] = pd.to_numeric(df[col], errors="coerce")
                         df = df.dropna(axis=1, how="all")
