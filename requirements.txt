@@ -5,4 +5,5 @@ python-dotenv
 sympy
 pint
 pandas
+plotly
 openpyxl

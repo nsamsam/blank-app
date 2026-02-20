@@ -155,17 +155,17 @@ with status_col:
 # ---------------------------------------------------------------------------
 # Tabs for each section
 # ---------------------------------------------------------------------------
-tab_well_info, tab_projects, tab_calculations, tab_import, tab_new_entry = st.tabs(
-    ["Well Info", "Projects", "Calculations", "Import Data", "New Entry"]
+tab_well_info, tab_ppfg, tab_calculations, tab_import, tab_new_entry = st.tabs(
+    ["Well Info", "PPFG", "Calculations", "Import Data", "New Entry"]
 )
 
 with tab_well_info:
     from pages import well_info
     well_info.render(active_well)
 
-with tab_projects:
-    from pages import projects
-    projects.render()
+with tab_ppfg:
+    from pages import ppfg
+    ppfg.render(active_well)
 
 with tab_calculations:
     from pages import calculations
