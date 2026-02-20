@@ -15,7 +15,6 @@ PPFG_COLUMNS = [
     "90% OBG",
     "85% OBG",
     "750psi over OBG",
-    "1000psi over OBG",
 ]
 
 _HEADER_LINE = "\t".join(PPFG_COLUMNS)
