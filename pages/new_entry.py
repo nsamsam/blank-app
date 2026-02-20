@@ -1,8 +1,13 @@
+import json
+
+import numpy as np
 import streamlit as st
+
 from db.connection import SessionLocal
 from models.well import Well
 from models.casing_section import CasingSection
 from models.casing_design import CasingDesign
+from models.ppfg_data import PpfgData
 
 # Design fields stored on CasingDesign
 _DESIGN_FIELDS = [
@@ -65,6 +70,105 @@ def _save_design(design_id: int, prefix: str):
     finally:
         session.close()
     st.toast("Saved!")
+
+
+# ------------------------------------------------------------------
+# PPFG interpolation helpers
+# ------------------------------------------------------------------
+
+def _load_ppfg_arrays(well_id: int):
+    """Return (tvd_arr, pp_arr, fg_arr) from the PPFG data, or (None, None, None)."""
+    session = SessionLocal()
+    try:
+        rec = session.query(PpfgData).filter_by(well_id=well_id).first()
+        if not rec:
+            return None, None, None
+        cols = json.loads(rec.columns_json)
+        rows = json.loads(rec.data_json)
+    finally:
+        session.close()
+
+    if not rows:
+        return None, None, None
+
+    # Find column keys in row dicts
+    sample = rows[0] if rows else {}
+    tvd_key = pp_key = fg_key = None
+    for k in sample.keys():
+        kl = k.strip().lower()
+        if kl == "tvd":
+            tvd_key = k
+        elif kl == "pp":
+            pp_key = k
+        elif "frac" in kl and "grad" in kl:
+            fg_key = k
+
+    # Fallback to exact column names
+    if tvd_key is None:
+        tvd_key = "TVD" if "TVD" in cols else None
+    if pp_key is None:
+        pp_key = "PP" if "PP" in cols else None
+    if fg_key is None:
+        fg_key = "Frac Grad" if "Frac Grad" in cols else None
+
+    if tvd_key is None:
+        return None, None, None
+
+    tvd_list, pp_list, fg_list = [], [], []
+    for row in rows:
+        try:
+            tvd_val = float(row.get(tvd_key))
+        except (TypeError, ValueError):
+            continue
+        tvd_list.append(tvd_val)
+
+        # PP — may be absent
+        try:
+            pp_list.append(float(row.get(pp_key)) if pp_key else np.nan)
+        except (TypeError, ValueError):
+            pp_list.append(np.nan)
+
+        # FG — may be absent
+        try:
+            fg_list.append(float(row.get(fg_key)) if fg_key else np.nan)
+        except (TypeError, ValueError):
+            fg_list.append(np.nan)
+
+    if len(tvd_list) < 2:
+        return None, None, None
+
+    return np.array(tvd_list), np.array(pp_list), np.array(fg_list)
+
+
+def _interp_at_tvd(target_tvd: float, tvd_arr, val_arr) -> float | None:
+    """Linearly interpolate a value at target_tvd from sorted survey arrays."""
+    if tvd_arr is None or val_arr is None:
+        return None
+
+    # Build valid (non-NaN) pairs
+    mask = ~np.isnan(val_arr)
+    tvd_v = tvd_arr[mask]
+    val_v = val_arr[mask]
+    if len(tvd_v) < 2:
+        return None
+
+    # Sort by TVD
+    order = np.argsort(tvd_v)
+    tvd_v = tvd_v[order]
+    val_v = val_v[order]
+
+    # Clamp to range (extrapolate from nearest segment)
+    if target_tvd <= tvd_v[0]:
+        if len(tvd_v) >= 2 and tvd_v[1] != tvd_v[0]:
+            return float(val_v[0] + (target_tvd - tvd_v[0]) / (tvd_v[1] - tvd_v[0]) * (val_v[1] - val_v[0]))
+        return float(val_v[0])
+    if target_tvd >= tvd_v[-1]:
+        if len(tvd_v) >= 2 and tvd_v[-1] != tvd_v[-2]:
+            return float(val_v[-2] + (target_tvd - tvd_v[-2]) / (tvd_v[-1] - tvd_v[-2]) * (val_v[-1] - val_v[-2]))
+        return float(val_v[-1])
+
+    # Normal interpolation
+    return float(np.interp(target_tvd, tvd_v, val_v))
 
 
 # ------------------------------------------------------------------
@@ -149,6 +253,10 @@ def render(well_name: str = "Well 1"):
         st.info("No casing sections defined. Go to the **Well Sections** tab first.")
         return
 
+    # Pre-load PPFG data for PP / FG interpolation
+    ppfg_tvd, ppfg_pp, ppfg_fg = _load_ppfg_arrays(well_id)
+    has_ppfg = ppfg_tvd is not None
+
     # --- Section selector ---
     section = st.selectbox(
         "Select Casing Section",
@@ -184,10 +292,35 @@ def render(well_name: str = "Well 1"):
     burst_rating = _f(section.burst_rating)
     tension_rating = _f(section.tension_rating)
 
-    # === 1. CASING PROPERTIES (read-only, from Well Sections) ===
-    with st.expander("Casing Properties", expanded=True):
-        c1, c2, c3, c4 = st.columns(4)
+    # --- Auto-fill Shoe PP, Shoe FG from PPFG, and TOC from Well Sections ---
+    if shoe_tvd_val is not None and has_ppfg:
+        pp_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_pp)
+        if pp_val is not None:
+            st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
+        fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
+        if fg_val is not None:
+            st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
+
+    # Auto-fill TOC from well sections
+    section_toc = section.toc or ""
+    if section_toc:
+        st.session_state[f"{prefix}_toc"] = section_toc
+
+    # Auto-fill Shoe MW from mud weight
+    if mud_wt_val is not None:
+        st.session_state[f"{prefix}_shoe_mw"] = f"{mud_wt_val}"
+
+    # Persist auto-filled values
+    _save_design_quiet(design.id, prefix)
+
+    # === SINGLE EXPANDER FOR ALL DESIGN DATA ===
+    section_label = section.section_name or f"Section {section.order_index + 1}"
+    with st.expander(f"{section_label} — Design Check", expanded=True):
+
+        # --- Casing Properties (read-only from Well Sections) ---
+        st.markdown("**Casing Properties**")
         _h = "From Well Sections"
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.text_input("Size (in)", value=csg_od, disabled=True, help=_h)
             st.text_input("Collapse Rating (psi)", value=section.collapse_rating or "", disabled=True, help=_h)
@@ -200,29 +333,46 @@ def render(well_name: str = "Well 1"):
         with c4:
             st.text_input("Thread / Connection", value=csg_thread, disabled=True, help=_h)
 
-    # === 2. DEPTH & PRESSURE DATA ===
-    with st.expander("Depth & Pressure Data", expanded=True):
+        st.divider()
+
+        # --- Depth & Pressure Data ---
+        st.markdown("**Depth & Pressure Data**")
         d1, d2, d3, d4 = st.columns(4)
         with d1:
             st.text_input("Bottom TVD (ft)", value=f"{shoe_tvd_val:.1f}" if shoe_tvd_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("Shoe PP (ppg)", key=f"{prefix}_shoe_pp", on_change=save)
+            st.text_input(
+                "Shoe PP (ppg)", key=f"{prefix}_shoe_pp", on_change=save,
+                disabled=has_ppfg and shoe_tvd_val is not None,
+                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
+            )
         with d2:
             st.text_input("Bottom MD (ft)", value=f"{shoe_md_val:.1f}" if shoe_md_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("Shoe MW (ppg)", key=f"{prefix}_shoe_mw", on_change=save)
+            st.text_input("Shoe MW (ppg)", key=f"{prefix}_shoe_mw", on_change=save,
+                          disabled=True, help="From Well Sections mud weight")
         with d3:
             st.text_input("Top TVD (ft)", value=f"{top_tvd_val:.1f}" if top_tvd_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("Shoe FG (ppg)", key=f"{prefix}_shoe_fg", on_change=save)
+            st.text_input(
+                "Shoe FG (ppg)", key=f"{prefix}_shoe_fg", on_change=save,
+                disabled=has_ppfg and shoe_tvd_val is not None,
+                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
+            )
         with d4:
             st.text_input("Top MD (ft)", value=f"{top_md_val:.1f}" if top_md_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("TOC (ft)", key=f"{prefix}_toc", on_change=save)
+            st.text_input("TOC (ft)", key=f"{prefix}_toc", on_change=save,
+                          disabled=bool(section_toc),
+                          help="Auto from Well Sections" if section_toc else "Enter manually or set in Well Sections")
 
-    # === 3. COLLAPSE ===
-    with st.expander("Collapse", expanded=True):
-        st.markdown("**Inputs**")
+        if not has_ppfg:
+            st.caption("Load PPFG data in the **PPFG** tab to auto-fill Shoe PP and Shoe FG.")
+
+        st.divider()
+
+        # --- Collapse ---
+        st.markdown("**Collapse**")
         cc1, cc2, cc3 = st.columns(3)
         with cc1:
             st.text_input("Displacing Fluid (ppg)", key=f"{prefix}_rho_displace", on_change=save,
@@ -236,20 +386,19 @@ def render(well_name: str = "Well 1"):
             st.text_input("SW / Mud Interval (ft)", key=f"{prefix}_tvd_sw", on_change=save,
                           help="TVD of seawater/mud column above cement")
 
-        st.divider()
-        st.markdown("**Results**")
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
-        r1, r2, r3 = st.columns(3)
-        with r1:
+        cr1, cr2, cr3 = st.columns(3)
+        with cr1:
             st.metric("P internal (psi)", f"{p_int:,.0f}" if p_int is not None else "—")
-        with r2:
+        with cr2:
             st.metric("P external (psi)", f"{p_ext:,.0f}" if p_ext is not None else "—")
-        with r3:
+        with cr3:
             st.metric("Collapse Load (psi)", f"{c_load:,.0f}" if c_load is not None else "—")
 
-    # === 4. BURST ===
-    with st.expander("Burst", expanded=True):
-        st.markdown("**Inputs**")
+        st.divider()
+
+        # --- Burst ---
+        st.markdown("**Burst**")
         b1, b2 = st.columns(2)
         with b1:
             st.text_input("Applied EMW (ppg)", key=f"{prefix}_burst_emw", on_change=save,
@@ -258,8 +407,6 @@ def render(well_name: str = "Well 1"):
             st.text_input("Formation Backup EMW (ppg)", key=f"{prefix}_backup_emw", on_change=save,
                           help="External formation pressure equivalent mud weight")
 
-        st.divider()
-        st.markdown("**Results**")
         bp_int, bp_ext, b_load = _calc_burst(prefix, shoe_tvd_val)
         br1, br2, br3 = st.columns(3)
         with br1:
@@ -269,9 +416,10 @@ def render(well_name: str = "Well 1"):
         with br3:
             st.metric("Burst Load (psi)", f"{b_load:,.0f}" if b_load is not None else "—")
 
-    # === 5. TENSION ===
-    with st.expander("Tension", expanded=True):
-        st.markdown("**Inputs**")
+        st.divider()
+
+        # --- Tension ---
+        st.markdown("**Tension**")
         t1, t2 = st.columns(2)
         with t1:
             st.text_input("Mud Weight (ppg)",
@@ -280,10 +428,7 @@ def render(well_name: str = "Well 1"):
         with t2:
             st.text_input("Overpull (lbs)", key=f"{prefix}_overpull", on_change=save)
 
-        st.divider()
-        st.markdown("**Results**")
         t_load = _calc_tension(prefix, csg_wt_val, shoe_md_val, top_md_val, mud_wt_val)
-
         length = (shoe_md_val - top_md_val) if shoe_md_val and top_md_val else None
         bf = ((65.5 - mud_wt_val) / 65.5) if mud_wt_val else None
 
@@ -295,23 +440,36 @@ def render(well_name: str = "Well 1"):
         with tr3:
             st.metric("Tension Load (lbs)", f"{t_load:,.0f}" if t_load is not None else "—")
 
-    # === 6. SAFETY FACTORS ===
-    _, _, c_load = _calc_collapse(prefix, shoe_tvd_val)
-    _, _, b_load = _calc_burst(prefix, shoe_tvd_val)
-    t_load = _calc_tension(prefix, csg_wt_val, shoe_md_val, top_md_val, mud_wt_val)
+        st.divider()
 
-    collapse_sf = (collapse_rating / c_load) if collapse_rating and c_load and c_load != 0 else None
-    burst_sf = (burst_rating / b_load) if burst_rating and b_load and b_load != 0 else None
-    tension_sf = (tension_rating / t_load) if tension_rating and t_load and t_load != 0 else None
+        # --- Safety Factors ---
+        st.markdown("**Safety Factors**")
+        _, _, c_load = _calc_collapse(prefix, shoe_tvd_val)
+        _, _, b_load = _calc_burst(prefix, shoe_tvd_val)
+        t_load = _calc_tension(prefix, csg_wt_val, shoe_md_val, top_md_val, mud_wt_val)
 
-    with st.expander("Safety Factors", expanded=True):
+        collapse_sf = (collapse_rating / c_load) if collapse_rating and c_load and c_load != 0 else None
+        burst_sf = (burst_rating / b_load) if burst_rating and b_load and b_load != 0 else None
+        tension_sf = (tension_rating / t_load) if tension_rating and t_load and t_load != 0 else None
+
         sf1, sf2, sf3 = st.columns(3)
         with sf1:
-            val = f"{collapse_sf:.2f}" if collapse_sf is not None else "—"
-            st.metric("Collapse SF", val)
+            st.metric("Collapse SF", f"{collapse_sf:.2f}" if collapse_sf is not None else "—")
         with sf2:
-            val = f"{burst_sf:.2f}" if burst_sf is not None else "—"
-            st.metric("Burst SF", val)
+            st.metric("Burst SF", f"{burst_sf:.2f}" if burst_sf is not None else "—")
         with sf3:
-            val = f"{tension_sf:.2f}" if tension_sf is not None else "—"
-            st.metric("Tension SF", val)
+            st.metric("Tension SF", f"{tension_sf:.2f}" if tension_sf is not None else "—")
+
+
+def _save_design_quiet(design_id: int, prefix: str):
+    """Save without toast notification (used for auto-fill updates)."""
+    session = SessionLocal()
+    try:
+        design = session.query(CasingDesign).get(design_id)
+        if not design:
+            return
+        for col in _DESIGN_FIELDS:
+            design.__setattr__(col, st.session_state.get(f"{prefix}_{col}", ""))
+        session.commit()
+    finally:
+        session.close()
