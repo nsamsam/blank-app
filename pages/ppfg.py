@@ -105,6 +105,19 @@ def render(well_name: str = "Well 1"):
         depth_col = "TVD"
         curve_cols = [c for c in df.columns if c != depth_col and df[c].notna().any()]
 
+        # Height slider so user can stretch the chart like in Excel
+        height_key = f"{prefix}_ppfg_height"
+        if height_key not in st.session_state:
+            st.session_state[height_key] = 800
+        chart_height = st.slider(
+            "Chart height (px)",
+            min_value=400,
+            max_value=3000,
+            value=st.session_state[height_key],
+            step=100,
+            key=height_key,
+        )
+
         fig = go.Figure()
         for col in curve_cols:
             series = df[[depth_col, col]].dropna()
@@ -117,12 +130,32 @@ def render(well_name: str = "Well 1"):
 
         fig.update_layout(
             title="PPFG Plot",
-            xaxis_title="Pressure / Gradient (ppg)",
-            yaxis_title="TVD (ft)",
-            yaxis=dict(autorange="reversed"),
-            height=700,
+            xaxis=dict(
+                title="Pressure / Gradient (ppg)",
+                dtick=0.5,
+                minor=dict(dtick=0.25, showgrid=True, gridcolor="lightgray"),
+                showline=True,
+                linecolor="gray",
+                mirror=True,
+                gridcolor="lightgray",
+            ),
+            yaxis=dict(
+                title="TVD (ft)",
+                autorange="reversed",
+                dtick=500,
+                minor=dict(dtick=250, showgrid=True, gridcolor="lightgray"),
+                showline=True,
+                linecolor="gray",
+                mirror=True,
+                gridcolor="lightgray",
+            ),
+            height=chart_height,
+            plot_bgcolor="white",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+            # Gray border around the plot area
+            margin=dict(l=60, r=30, t=60, b=60),
         )
+
         st.plotly_chart(fig, use_container_width=True)
 
         with st.expander("View Data Table"):
