@@ -144,46 +144,13 @@ else:
         st.rerun()
 
 # ---------------------------------------------------------------------------
-# Main area — Title row with Save button
+# Main area — Title row with autosave indicator
 # ---------------------------------------------------------------------------
-title_col, save_col = st.columns([4, 1])
+title_col, status_col = st.columns([4, 1])
 title_col.title(active_well)
-
-
-def _save_all(well_name):
-    """Save all well info fields from session state to the database."""
-    prefix = well_name.replace(" ", "_").lower()
-    field_map = {
-        "date": f"{prefix}_date",
-        "rev": f"{prefix}_rev",
-        "rig": f"{prefix}_rig",
-        "start_date": f"{prefix}_start_date",
-        "directional_rev": f"{prefix}_directional",
-        "block": f"{prefix}_block",
-        "lease": f"{prefix}_lease",
-        "well": f"{prefix}_well",
-        "water_depth": f"{prefix}_water_depth",
-        "rkb_msl": f"{prefix}_rkb_msl",
-        "rkb_ml": f"{prefix}_rkb_ml",
-        "rkb_wh": f"{prefix}_rkb_wh",
-    }
-    data = {db_col: st.session_state.get(ss_key, "") for db_col, ss_key in field_map.items()}
-    session = SessionLocal()
-    try:
-        well = session.query(Well).filter_by(name=well_name).first()
-        if well:
-            for k, v in data.items():
-                setattr(well, k, v)
-            session.commit()
-    finally:
-        session.close()
-
-
-with save_col:
+with status_col:
     st.write("")  # spacing to align with title
-    if st.button("Save", key="save_all_btn", type="primary"):
-        _save_all(active_well)
-        st.toast("Saved!")
+    st.caption("Autosave on")
 
 # ---------------------------------------------------------------------------
 # Tabs for each section
