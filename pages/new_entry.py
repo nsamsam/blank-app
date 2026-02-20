@@ -400,8 +400,8 @@ def render(well_name: str = "Well 1"):
         with cc3:
             st.text_input("Lead Cement Interval (ft)", key=f"{prefix}_tvd_lead",
                           disabled=True, help="Auto: TOC − Tail Cement Interval")
-            st.text_input("SW / Mud Interval (ft)", key=f"{prefix}_tvd_sw", on_change=save,
-                          help="TVD of seawater/mud column above cement")
+            st.text_input("Water Depth (ft)", key=f"{prefix}_tvd_sw", on_change=save,
+                          help="Water depth above cement")
 
         # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
@@ -418,7 +418,7 @@ def render(well_name: str = "Well 1"):
         lines.append(f"            = {_v(rho_d)} × 0.052 × {_v(shoe_tvd_val, 1)}")
         lines.append(f"            = {_v(p_int, 0, True)} psi")
         lines.append("")
-        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_SW × SW Int)")
+        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_SW × Water Depth)")
         lines.append(f"            = (0.052 × {_v(rho_t)} × {_v(tvd_t, 1)}) + (0.052 × {_v(rho_l)} × {_v(tvd_l, 1)}) + (0.052 × {_v(rho_d)} × {_v(tvd_s, 1)})")
         if p_ext is not None:
             t1 = 0.052 * rho_t * tvd_t if None not in (rho_t, tvd_t) else None
