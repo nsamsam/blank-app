@@ -19,6 +19,14 @@ class Project(Base):
     entries: Mapped[list["Entry"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Entry.created_at.desc()"
     )
+    calculations: Mapped[list["Calculation"]] = relationship(
+        "Calculation", back_populates="project", cascade="all, delete-orphan",
+        order_by="Calculation.created_at.desc()"
+    )
+    datasets: Mapped[list["Dataset"]] = relationship(
+        "Dataset", back_populates="project", cascade="all, delete-orphan",
+        order_by="Dataset.created_at.desc()"
+    )
 
     def __repr__(self) -> str:
         return f"<Project {self.id}: {self.name}>"

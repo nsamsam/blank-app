@@ -2,3 +2,7 @@ streamlit
 sqlalchemy
 psycopg2-binary
 python-dotenv
+sympy
+pint
+pandas
+openpyxl

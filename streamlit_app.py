@@ -13,7 +13,10 @@ init_db()
 # Sidebar navigation
 # ---------------------------------------------------------------------------
 st.sidebar.title("Engineering Workbook")
-page = st.sidebar.radio("Navigate", ["Dashboard", "Projects", "New Entry"])
+page = st.sidebar.radio(
+    "Navigate",
+    ["Dashboard", "Projects", "Calculations", "Import Data", "New Entry"],
+)
 
 # ---------------------------------------------------------------------------
 # Page routing
@@ -24,6 +27,12 @@ if page == "Dashboard":
 elif page == "Projects":
     from pages import projects
     projects.render()
+elif page == "Calculations":
+    from pages import calculations
+    calculations.render()
+elif page == "Import Data":
+    from pages import import_data
+    import_data.render()
 elif page == "New Entry":
     from pages import new_entry
     new_entry.render()
