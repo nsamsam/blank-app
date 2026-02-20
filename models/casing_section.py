@@ -21,6 +21,10 @@ class CasingSection(Base):
     shoe_tvd: Mapped[str | None] = mapped_column(String(100), nullable=True)
     shoe_md: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mud_weight: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    collapse_rating: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    burst_rating: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tension_rating: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    thread: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )

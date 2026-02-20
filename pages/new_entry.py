@@ -4,9 +4,8 @@ from models.well import Well
 from models.casing_section import CasingSection
 from models.casing_design import CasingDesign
 
-# Design fields stored on CasingDesign (db_col, label, default)
+# Design fields stored on CasingDesign
 _DESIGN_FIELDS = [
-    "collapse_rating", "burst_rating", "tension_rating", "thread",
     "shoe_pp", "shoe_mw", "shoe_fg", "toc",
     "rho_displace", "rho_tail", "tvd_tail", "rho_lead", "tvd_lead", "tvd_sw",
     "burst_emw", "backup_emw", "overpull",
@@ -174,27 +173,32 @@ def render(well_name: str = "Well 1"):
     csg_od = section.casing_od or ""
     csg_wt_str = section.casing_weight or ""
     csg_grade = section.casing_grade or ""
+    csg_thread = section.thread or ""
     shoe_tvd_val = _f(section.shoe_tvd)
     shoe_md_val = _f(section.shoe_md)
     top_tvd_val = _f(section.top_tvd)
     top_md_val = _f(section.top_md)
     mud_wt_val = _f(section.mud_weight)
     csg_wt_val = _f(csg_wt_str)
+    collapse_rating = _f(section.collapse_rating)
+    burst_rating = _f(section.burst_rating)
+    tension_rating = _f(section.tension_rating)
 
-    # === 1. CASING PROPERTIES ===
+    # === 1. CASING PROPERTIES (read-only, from Well Sections) ===
     with st.expander("Casing Properties", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
+        _h = "From Well Sections"
         with c1:
-            st.text_input("Size (in)", value=csg_od, disabled=True, help="From Well Sections")
-            st.text_input("Collapse Rating (psi)", key=f"{prefix}_collapse_rating", on_change=save)
+            st.text_input("Size (in)", value=csg_od, disabled=True, help=_h)
+            st.text_input("Collapse Rating (psi)", value=section.collapse_rating or "", disabled=True, help=_h)
         with c2:
-            st.text_input("Weight (ppf)", value=csg_wt_str, disabled=True, help="From Well Sections")
-            st.text_input("Burst Rating (psi)", key=f"{prefix}_burst_rating", on_change=save)
+            st.text_input("Weight (ppf)", value=csg_wt_str, disabled=True, help=_h)
+            st.text_input("Burst Rating (psi)", value=section.burst_rating or "", disabled=True, help=_h)
         with c3:
-            st.text_input("Grade", value=csg_grade, disabled=True, help="From Well Sections")
-            st.text_input("Tension Rating (lbs)", key=f"{prefix}_tension_rating", on_change=save)
+            st.text_input("Grade", value=csg_grade, disabled=True, help=_h)
+            st.text_input("Tension Rating (lbs)", value=section.tension_rating or "", disabled=True, help=_h)
         with c4:
-            st.text_input("Thread / Connection", key=f"{prefix}_thread", on_change=save)
+            st.text_input("Thread / Connection", value=csg_thread, disabled=True, help=_h)
 
     # === 2. DEPTH & PRESSURE DATA ===
     with st.expander("Depth & Pressure Data", expanded=True):
@@ -292,10 +296,6 @@ def render(well_name: str = "Well 1"):
             st.metric("Tension Load (lbs)", f"{t_load:,.0f}" if t_load is not None else "—")
 
     # === 6. SAFETY FACTORS ===
-    collapse_rating = _f(st.session_state.get(f"{prefix}_collapse_rating"))
-    burst_rating = _f(st.session_state.get(f"{prefix}_burst_rating"))
-    tension_rating = _f(st.session_state.get(f"{prefix}_tension_rating"))
-
     _, _, c_load = _calc_collapse(prefix, shoe_tvd_val)
     _, _, b_load = _calc_burst(prefix, shoe_tvd_val)
     t_load = _calc_tension(prefix, csg_wt_val, shoe_md_val, top_md_val, mud_wt_val)

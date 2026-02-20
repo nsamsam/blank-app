@@ -34,6 +34,10 @@ _WELL_COLUMNS_TO_ADD = [
 _CASING_COLUMNS_TO_ADD = [
     ("top_tvd", "VARCHAR(100)"),
     ("shoe_tvd", "VARCHAR(100)"),
+    ("collapse_rating", "VARCHAR(100)"),
+    ("burst_rating", "VARCHAR(100)"),
+    ("tension_rating", "VARCHAR(100)"),
+    ("thread", "VARCHAR(200)"),
 ]
 
 

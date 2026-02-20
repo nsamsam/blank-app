@@ -21,8 +21,15 @@ _GENERAL_FIELDS = [
     ("mud_weight", "Mud Wt (ppg)"),
 ]
 
-# All fields that get persisted (general + depth)
-_ALL_DB_FIELDS = [f for f, _ in _GENERAL_FIELDS] + [
+_RATING_FIELDS = [
+    ("collapse_rating", "Collapse Rating (psi)"),
+    ("burst_rating", "Burst Rating (psi)"),
+    ("tension_rating", "Tension Rating (lbs)"),
+    ("thread", "Thread / Connection"),
+]
+
+# All fields that get persisted (general + ratings + depth)
+_ALL_DB_FIELDS = [f for f, _ in _GENERAL_FIELDS] + [f for f, _ in _RATING_FIELDS] + [
     "section_name", "top_tvd", "top_md", "shoe_tvd", "shoe_md",
 ]
 
@@ -275,9 +282,19 @@ def render(well_name: str = "Well 1"):
                 st.text_input("Section Name", key=f"{prefix}_section_name", on_change=save)
 
                 # General fields — 3 columns
+                st.markdown("**Casing Details**")
                 c1, c2, c3 = st.columns(3)
                 for i, (db_col, label_text) in enumerate(_GENERAL_FIELDS):
                     with [c1, c2, c3][i % 3]:
+                        st.text_input(label_text, key=f"{prefix}_{db_col}", on_change=save)
+
+                st.divider()
+
+                # Rating fields
+                st.markdown("**Burst, Collapse & Tension**")
+                r1, r2, r3, r4 = st.columns(4)
+                for col_w, (db_col, label_text) in zip([r1, r2, r3, r4], _RATING_FIELDS):
+                    with col_w:
                         st.text_input(label_text, key=f"{prefix}_{db_col}", on_change=save)
 
                 st.divider()
