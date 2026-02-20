@@ -59,8 +59,8 @@ def render(well_name: str = "Well 1"):
     # Load DB values into session state on first visit for this well
     _init_session_state(well_name, prefix)
 
-    def _recalc_derived():
-        """Recalculate all derived fields (RKB-ML, RKB to LPWHH, RKB to HPWHH) and autosave."""
+    def _calc_derived(do_save=True):
+        """Recalculate all derived fields (RKB-ML, RKB to LPWHH, RKB to HPWHH)."""
         wd = st.session_state.get(f"{prefix}_water_depth", "")
         msl = st.session_state.get(f"{prefix}_rkb_msl", "")
         try:
@@ -81,7 +81,14 @@ def render(well_name: str = "Well 1"):
             except (ValueError, TypeError):
                 pass
 
-        _autosave(well_name, prefix)
+        if do_save:
+            _autosave(well_name, prefix)
+
+    def _recalc_derived():
+        _calc_derived(do_save=True)
+
+    # Eagerly compute derived fields on every render so they stay up-to-date
+    _calc_derived(do_save=False)
 
     save = lambda: _autosave(well_name, prefix)
 
