@@ -155,8 +155,8 @@ with status_col:
 # ---------------------------------------------------------------------------
 # Tabs for each section
 # ---------------------------------------------------------------------------
-tab_well_info, tab_ppfg, tab_directional, tab_sections, tab_new_entry = st.tabs(
-    ["Well Info", "PPFG", "Directional", "Well Sections", "New Entry"]
+tab_well_info, tab_ppfg, tab_directional, tab_sections, tab_casing_design = st.tabs(
+    ["Well Info", "PPFG", "Directional", "Well Sections", "Casing Design"]
 )
 
 with tab_well_info:
@@ -175,6 +175,6 @@ with tab_sections:
     from pages import well_sections
     well_sections.render(active_well)
 
-with tab_new_entry:
+with tab_casing_design:
     from pages import new_entry
-    new_entry.render()
+    new_entry.render(active_well)
