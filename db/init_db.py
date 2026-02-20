@@ -31,6 +31,7 @@ _WELL_COLUMNS_TO_ADD = [
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_wells_table()
+    _migrate_ppfg_data_table()
 
 
 def _migrate_wells_table():
@@ -44,6 +45,27 @@ def _migrate_wells_table():
             if col_name not in existing:
                 conn.execute(
                     text(f"ALTER TABLE wells ADD COLUMN {col_name} {col_type}")
+                )
+
+
+_PPFG_COLUMNS_TO_ADD = [
+    ("columns_json", "TEXT DEFAULT '[]'"),
+    ("data_json", "TEXT DEFAULT '[]'"),
+    ("updated_at", "TIMESTAMP"),
+]
+
+
+def _migrate_ppfg_data_table():
+    """Add any missing columns to the existing ppfg_data table."""
+    insp = inspect(engine)
+    if "ppfg_data" not in insp.get_table_names():
+        return
+    existing = {col["name"] for col in insp.get_columns("ppfg_data")}
+    with engine.begin() as conn:
+        for col_name, col_type in _PPFG_COLUMNS_TO_ADD:
+            if col_name not in existing:
+                conn.execute(
+                    text(f"ALTER TABLE ppfg_data ADD COLUMN {col_name} {col_type}")
                 )
 
 
