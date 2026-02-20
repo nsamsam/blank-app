@@ -30,9 +30,11 @@ _WELL_COLUMNS_TO_ADD = [
 
 
 def init_db():
+    # Drop stale JSON-data tables BEFORE create_all, so they get recreated
+    # with the correct schema. create_all skips tables that already exist.
+    _drop_stale_json_data_tables()
     Base.metadata.create_all(bind=engine)
     _migrate_wells_table()
-    _migrate_json_data_tables()
 
 
 def _migrate_wells_table():
@@ -55,17 +57,18 @@ _JSON_DATA_EXPECTED_COLUMNS = {"id", "well_id", "columns_json", "data_json", "up
 _JSON_DATA_TABLES = ["ppfg_data", "directional_data"]
 
 
-def _migrate_json_data_tables():
-    """Recreate JSON-data tables if their schema is stale."""
+def _drop_stale_json_data_tables():
+    """Drop JSON-data tables whose schema doesn't match the model."""
     insp = inspect(engine)
+    tables = insp.get_table_names()
     for table_name in _JSON_DATA_TABLES:
-        if table_name not in insp.get_table_names():
+        if table_name not in tables:
             continue
         existing = {col["name"] for col in insp.get_columns(table_name)}
         if existing != _JSON_DATA_EXPECTED_COLUMNS:
             with engine.begin() as conn:
                 conn.execute(text(f"DROP TABLE {table_name}"))
-            Base.metadata.tables[table_name].create(bind=engine)
+
 
 
 if __name__ == "__main__":
