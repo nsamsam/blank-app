@@ -2,6 +2,7 @@
 
 from models.base import Base
 from db.connection import engine
+import models.well  # noqa: F401 — ensure Well table is created
 
 
 def init_db():

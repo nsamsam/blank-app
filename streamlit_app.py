@@ -57,38 +57,91 @@ if st.sidebar.button("Log out"):
     st.rerun()
 
 # ---------------------------------------------------------------------------
-# Sidebar — Wells list
+# Sidebar — Wells list (persisted in DB)
 # ---------------------------------------------------------------------------
+from db.connection import SessionLocal
+from models.well import Well
+
 st.sidebar.title("Engineering Workbook")
-
-# Initialise wells list in session state
-if "wells" not in st.session_state:
-    st.session_state["wells"] = ["Well 1"]
-if "active_well" not in st.session_state:
-    st.session_state["active_well"] = "Well 1"
-
 st.sidebar.subheader("Wells")
+
+
+def _load_wells():
+    """Return list of well names from the database."""
+    session = SessionLocal()
+    try:
+        return [w.name for w in session.query(Well).order_by(Well.id).all()]
+    finally:
+        session.close()
+
 
 # Add-well form
 with st.sidebar.expander("Add Well"):
     new_well_name = st.text_input("Well name", key="new_well_input")
     if st.button("Add", key="add_well_btn"):
         name = new_well_name.strip()
-        if name and name not in st.session_state["wells"]:
-            st.session_state["wells"].append(name)
-            st.session_state["active_well"] = name
-            st.rerun()
-        elif name in st.session_state["wells"]:
-            st.sidebar.warning("Well already exists.")
+        if not name:
+            st.sidebar.warning("Enter a well name.")
+        else:
+            session = SessionLocal()
+            try:
+                exists = session.query(Well).filter_by(name=name).first()
+                if exists:
+                    st.sidebar.warning("Well already exists.")
+                else:
+                    session.add(Well(name=name))
+                    session.commit()
+                    st.session_state["active_well"] = name
+                    st.rerun()
+            finally:
+                session.close()
+
+well_names = _load_wells()
+
+if not well_names:
+    st.sidebar.info("No wells yet. Add one above.")
+    st.stop()
+
+# Ensure active_well is valid
+if st.session_state.get("active_well") not in well_names:
+    st.session_state["active_well"] = well_names[0]
 
 # Well selector
 active_well = st.sidebar.radio(
     "Select Well",
-    st.session_state["wells"],
-    index=st.session_state["wells"].index(st.session_state["active_well"]),
+    well_names,
+    index=well_names.index(st.session_state["active_well"]),
     key="well_selector",
 )
 st.session_state["active_well"] = active_well
+
+# Delete well with confirmation
+st.sidebar.divider()
+if f"confirm_delete_{active_well}" not in st.session_state:
+    st.session_state[f"confirm_delete_{active_well}"] = False
+
+if not st.session_state[f"confirm_delete_{active_well}"]:
+    if st.sidebar.button("Delete Well", key="delete_well_btn", type="primary"):
+        st.session_state[f"confirm_delete_{active_well}"] = True
+        st.rerun()
+else:
+    st.sidebar.warning(f'Are you sure you want to delete **{active_well}**?')
+    col_yes, col_no = st.sidebar.columns(2)
+    if col_yes.button("Yes, delete", key="confirm_delete_yes"):
+        session = SessionLocal()
+        try:
+            well = session.query(Well).filter_by(name=active_well).first()
+            if well:
+                session.delete(well)
+                session.commit()
+        finally:
+            session.close()
+        st.session_state.pop(f"confirm_delete_{active_well}", None)
+        st.session_state.pop("active_well", None)
+        st.rerun()
+    if col_no.button("Cancel", key="confirm_delete_no"):
+        st.session_state[f"confirm_delete_{active_well}"] = False
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # Main area — Tabs for each section
