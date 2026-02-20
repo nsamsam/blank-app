@@ -190,6 +190,8 @@ def render(well_name: str = "Well 1"):
         has_vsec = "VSEC (ft)" in df.columns
         if has_tvd and has_vsec:
             path = df[["VSEC (ft)", "TVD (ft)"]].dropna()
+            tvd_min = path["TVD (ft)"].min() - 500
+            tvd_max = path["TVD (ft)"].max() + 500
             fig_path = go.Figure()
             fig_path.add_trace(go.Scatter(
                 x=path["VSEC (ft)"],
@@ -201,7 +203,7 @@ def render(well_name: str = "Well 1"):
                 title="Wellbore Path — TVD vs VSEC",
                 xaxis=dict(title="VSEC (ft)", showline=True, linecolor="gray",
                            mirror=True, gridcolor="lightgray"),
-                yaxis=dict(title="TVD (ft)", autorange="reversed", showline=True,
+                yaxis=dict(title="TVD (ft)", range=[tvd_max, tvd_min], showline=True,
                            linecolor="gray", mirror=True, gridcolor="lightgray"),
                 height=chart_height,
                 plot_bgcolor="white",
@@ -238,6 +240,8 @@ def render(well_name: str = "Well 1"):
         has_dls = "DLS (°/100ft)" in df.columns
         if has_md and has_dls:
             dls = df[["MD (ft)", "DLS (°/100ft)"]].dropna()
+            md_min = dls["MD (ft)"].min() - 500
+            md_max = dls["MD (ft)"].max() + 500
             fig_dls = go.Figure()
             fig_dls.add_trace(go.Scatter(
                 x=dls["DLS (°/100ft)"],
@@ -249,7 +253,7 @@ def render(well_name: str = "Well 1"):
                 title="Dog Leg Severity vs MD",
                 xaxis=dict(title="DLS (°/100ft)", showline=True, linecolor="gray",
                            mirror=True, gridcolor="lightgray"),
-                yaxis=dict(title="MD (ft)", autorange="reversed", showline=True,
+                yaxis=dict(title="MD (ft)", range=[md_max, md_min], showline=True,
                            linecolor="gray", mirror=True, gridcolor="lightgray"),
                 height=chart_height,
                 plot_bgcolor="white",
