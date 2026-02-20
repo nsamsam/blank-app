@@ -24,8 +24,11 @@ _WELL_COLUMNS_TO_ADD = [
 
 
 def init_db():
+    # --- ONE-TIME RESET: drop old wells table so it gets recreated cleanly ---
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS wells CASCADE"))
+    # -------------------------------------------------------------------------
     Base.metadata.create_all(bind=engine)
-    _migrate_wells_table()
 
 
 def _migrate_wells_table():
