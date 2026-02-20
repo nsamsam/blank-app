@@ -5,6 +5,7 @@ from models.base import Base
 from db.connection import engine
 import models.well  # noqa: F401 — ensure Well table is created
 import models.ppfg_data  # noqa: F401 — ensure PpfgData table is created
+import models.directional_data  # noqa: F401 — ensure DirectionalData table is created
 
 # Columns to add to the wells table if they don't already exist
 _WELL_COLUMNS_TO_ADD = [
