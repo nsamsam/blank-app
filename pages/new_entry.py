@@ -403,7 +403,8 @@ def render(well_name: str = "Well 1"):
         md_lead_interval = toc_val - md_tail_val
         st.session_state[f"{prefix}_md_lead"] = f"{md_lead_interval:.1f}"
 
-    # Auto-compute TVD intervals from MD using directional survey
+    # Auto-compute TVD intervals from MD using directional survey interpolation
+    _lead_tvd_auto = False
     if has_survey and shoe_md_val is not None:
         if md_tail_val is not None:
             top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
@@ -412,10 +413,13 @@ def render(well_name: str = "Well 1"):
 
         md_lead_v = _f(st.session_state.get(f"{prefix}_md_lead"))
         if md_tail_val is not None and md_lead_v is not None:
+            # Interpolate TVD at the top-of-tail and top-of-lead absolute MD positions
             top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
-            top_lead_tvd = _md_to_tvd(shoe_md_val - md_tail_val - md_lead_v, survey_md, survey_tvd)
+            top_lead_md = shoe_md_val - md_tail_val - md_lead_v
+            top_lead_tvd = _md_to_tvd(top_lead_md, survey_md, survey_tvd)
             if top_tail_tvd is not None and top_lead_tvd is not None:
                 st.session_state[f"{prefix}_tvd_lead"] = f"{top_tail_tvd - top_lead_tvd:.1f}"
+                _lead_tvd_auto = True
 
     # Persist auto-filled values
     _save_design_quiet(design.id, prefix)
@@ -498,7 +502,8 @@ def render(well_name: str = "Well 1"):
                           disabled=has_survey and shoe_md_val is not None,
                           help="Auto from directional survey" if has_survey else "Enter manually or load survey")
             st.text_input("Lead Cement Interval TVD (ft)", key=f"{prefix}_tvd_lead",
-                          disabled=True, help="Auto from directional survey")
+                          disabled=_lead_tvd_auto,
+                          help="Auto from directional survey" if _lead_tvd_auto else "Enter manually or load survey")
 
         # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
