@@ -27,8 +27,10 @@ class CasingDesign(Base):
     # Collapse inputs — cement column
     rho_displace: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rho_tail: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    md_tail: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tvd_tail: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rho_lead: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    md_lead: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tvd_lead: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tvd_sw: Mapped[str | None] = mapped_column(String(100), nullable=True)
 

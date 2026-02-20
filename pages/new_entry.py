@@ -8,11 +8,12 @@ from models.well import Well
 from models.casing_section import CasingSection
 from models.casing_design import CasingDesign
 from models.ppfg_data import PpfgData
+from models.directional_data import DirectionalData
 
 # Design fields stored on CasingDesign
 _DESIGN_FIELDS = [
     "shoe_pp", "shoe_mw", "shoe_fg", "toc",
-    "rho_displace", "rho_tail", "tvd_tail", "rho_lead", "tvd_lead", "tvd_sw",
+    "rho_displace", "rho_tail", "md_tail", "tvd_tail", "rho_lead", "md_lead", "tvd_lead", "tvd_sw",
     "burst_emw", "backup_emw", "overpull",
 ]
 
@@ -175,6 +176,62 @@ def _interp_at_tvd(target_tvd: float, tvd_arr, val_arr) -> float | None:
     return float(np.interp(target_tvd, tvd_v, val_v))
 
 
+def _load_survey_arrays(well_id: int):
+    """Return (md_array, tvd_array) from the directional survey, or (None, None)."""
+    session = SessionLocal()
+    try:
+        rec = session.query(DirectionalData).filter_by(well_id=well_id).first()
+        if not rec:
+            return None, None
+        cols = json.loads(rec.columns_json)
+        rows = json.loads(rec.data_json)
+    finally:
+        session.close()
+
+    if not rows:
+        return None, None
+
+    sample = rows[0] if rows else {}
+    md_key = tvd_key = None
+    for k in sample.keys():
+        kl = k.lower().strip()
+        if kl.startswith("md") and "ft" in kl:
+            md_key = k
+        elif kl.startswith("tvd") and "ft" in kl and "ss" not in kl:
+            tvd_key = k
+
+    if md_key is None:
+        md_key = "MD (ft)" if "MD (ft)" in cols else None
+    if tvd_key is None:
+        tvd_key = "TVD (ft)" if "TVD (ft)" in cols else None
+
+    if md_key is None or tvd_key is None:
+        return None, None
+
+    md_list, tvd_list = [], []
+    for row in rows:
+        try:
+            md_list.append(float(row.get(md_key)))
+            tvd_list.append(float(row.get(tvd_key)))
+        except (TypeError, ValueError):
+            continue
+
+    if len(md_list) < 2:
+        return None, None
+
+    return np.array(md_list), np.array(tvd_list)
+
+
+def _md_to_tvd(target_md: float, md_arr, tvd_arr) -> float | None:
+    """Interpolate TVD at a given absolute MD from the directional survey."""
+    if md_arr is None or tvd_arr is None or len(md_arr) < 2:
+        return None
+    order = np.argsort(md_arr)
+    md_sorted = md_arr[order]
+    tvd_sorted = tvd_arr[order]
+    return float(np.interp(target_md, md_sorted, tvd_sorted))
+
+
 # ------------------------------------------------------------------
 # Calculation helpers
 # ------------------------------------------------------------------
@@ -272,6 +329,10 @@ def render(well_name: str = "Well 1"):
     ppfg_tvd, ppfg_pp, ppfg_fg = _load_ppfg_arrays(well_id)
     has_ppfg = ppfg_tvd is not None
 
+    # Pre-load directional survey for MD → TVD conversion
+    survey_md, survey_tvd = _load_survey_arrays(well_id)
+    has_survey = survey_md is not None
+
     # --- Section selector ---
     section = st.selectbox(
         "Select Casing Section",
@@ -325,12 +386,28 @@ def render(well_name: str = "Well 1"):
     if section_toc:
         st.session_state[f"{prefix}_toc"] = section_toc
 
-    # Auto-compute Lead Cement Interval = TOC − Tail Cement Interval
+    # Auto-compute cement intervals: user enters MD, system looks up TVD
     toc_val = _f(st.session_state.get(f"{prefix}_toc"))
-    tvd_tail_val = _f(st.session_state.get(f"{prefix}_tvd_tail"))
-    if toc_val is not None and tvd_tail_val is not None:
-        lead_interval = toc_val - tvd_tail_val
-        st.session_state[f"{prefix}_tvd_lead"] = f"{lead_interval:.1f}"
+    md_tail_val = _f(st.session_state.get(f"{prefix}_md_tail"))
+
+    # Auto-compute Lead Cement MD interval = TOC − Tail Cement MD interval
+    if toc_val is not None and md_tail_val is not None:
+        md_lead_interval = toc_val - md_tail_val
+        st.session_state[f"{prefix}_md_lead"] = f"{md_lead_interval:.1f}"
+
+    # Auto-compute TVD intervals from MD using directional survey
+    if has_survey and shoe_md_val is not None:
+        if md_tail_val is not None:
+            top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
+            if shoe_tvd_val is not None and top_tail_tvd is not None:
+                st.session_state[f"{prefix}_tvd_tail"] = f"{shoe_tvd_val - top_tail_tvd:.1f}"
+
+        md_lead_v = _f(st.session_state.get(f"{prefix}_md_lead"))
+        if md_tail_val is not None and md_lead_v is not None:
+            top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
+            top_lead_tvd = _md_to_tvd(shoe_md_val - md_tail_val - md_lead_v, survey_md, survey_tvd)
+            if top_tail_tvd is not None and top_lead_tvd is not None:
+                st.session_state[f"{prefix}_tvd_lead"] = f"{top_tail_tvd - top_lead_tvd:.1f}"
 
     # Persist auto-filled values
     _save_design_quiet(design.id, prefix)
@@ -394,20 +471,26 @@ def render(well_name: str = "Well 1"):
 
         # --- Collapse ---
         st.markdown("**Collapse**")
-        cc1, cc2, cc3 = st.columns(3)
+        cc1, cc2, cc3, cc4 = st.columns(4)
         with cc1:
             st.text_input("SW Density (ppg)", key=f"{prefix}_rho_displace", on_change=save,
                           help="Seawater density (default 8.6)")
             st.text_input("Tail Cement (ppg)", key=f"{prefix}_rho_tail", on_change=save)
-        with cc2:
             st.text_input("Lead Cement (ppg)", key=f"{prefix}_rho_lead", on_change=save)
-            st.text_input("Tail Cement Interval (ft)", key=f"{prefix}_tvd_tail", on_change=save)
-        with cc3:
-            st.text_input("Lead Cement Interval (ft)", key=f"{prefix}_tvd_lead",
-                          disabled=True, help="Auto: TOC − Tail Cement Interval")
+        with cc2:
             st.text_input("Water Depth (ft)", key=f"{prefix}_tvd_sw", on_change=save,
                           disabled=bool(well_water_depth),
                           help="Auto from Well Info" if well_water_depth else "Enter manually or set in Well Info")
+            st.text_input("Tail Cement Interval MD (ft)", key=f"{prefix}_md_tail", on_change=save)
+            st.text_input("Lead Cement Interval MD (ft)", key=f"{prefix}_md_lead",
+                          disabled=True, help="Auto: TOC − Tail Cement MD")
+        with cc3:
+            st.markdown("<div style='height:56px'></div>", unsafe_allow_html=True)
+            st.text_input("Tail Cement Interval TVD (ft)", key=f"{prefix}_tvd_tail",
+                          disabled=has_survey and shoe_md_val is not None,
+                          help="Auto from directional survey" if has_survey else "Enter manually or load survey")
+            st.text_input("Lead Cement Interval TVD (ft)", key=f"{prefix}_tvd_lead",
+                          disabled=True, help="Auto from directional survey")
 
         # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
@@ -424,7 +507,7 @@ def render(well_name: str = "Well 1"):
         lines.append(f"            = {_v(rho_d)} × 0.052 × {_v(shoe_tvd_val, 1)}")
         lines.append(f"            = {_v(p_int, 0, True)} psi")
         lines.append("")
-        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_SW × Water Depth)")
+        lines.append(f"P external  = (0.052 × ρ_tail × Tail Cement Interval TVD) + (0.052 × ρ_lead × Lead Cement Interval TVD) + (0.052 × ρ_SW × Water Depth)")
         lines.append(f"            = (0.052 × {_v(rho_t)} × {_v(tvd_t, 1)}) + (0.052 × {_v(rho_l)} × {_v(tvd_l, 1)}) + (0.052 × {_v(rho_d)} × {_v(tvd_s, 1)})")
         if p_ext is not None:
             t1 = 0.052 * rho_t * tvd_t if None not in (rho_t, tvd_t) else None
