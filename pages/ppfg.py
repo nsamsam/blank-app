@@ -1,6 +1,13 @@
-import streamlit as st
+import json
+from io import StringIO
+
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
+
+from db.connection import SessionLocal
+from models.ppfg_data import PpfgData
+from models.well import Well
 
 # Expected columns — TVD is required, all others are optional
 PPFG_COLUMNS = [
@@ -43,10 +50,90 @@ def _match_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ------------------------------------------------------------------
+# DB helpers
+# ------------------------------------------------------------------
+
+def _get_well_id(well_name: str) -> int | None:
+    session = SessionLocal()
+    try:
+        well = session.query(Well).filter_by(name=well_name).first()
+        return well.id if well else None
+    finally:
+        session.close()
+
+
+def _load_from_db(well_id: int) -> pd.DataFrame | None:
+    """Load saved PPFG data for a well. Returns DataFrame or None."""
+    session = SessionLocal()
+    try:
+        rec = session.query(PpfgData).filter_by(well_id=well_id).first()
+        if not rec or not rec.data_json or rec.data_json == "[]":
+            return None
+        cols = json.loads(rec.columns_json)
+        rows = json.loads(rec.data_json)
+        if not rows:
+            return None
+        return pd.DataFrame(rows, columns=cols)
+    finally:
+        session.close()
+
+
+def _save_to_db(well_id: int, df: pd.DataFrame):
+    """Upsert PPFG data for a well."""
+    session = SessionLocal()
+    try:
+        rec = session.query(PpfgData).filter_by(well_id=well_id).first()
+        columns_json = json.dumps(list(df.columns))
+        data_json = df.to_json(orient="records")
+        if rec:
+            rec.columns_json = columns_json
+            rec.data_json = data_json
+        else:
+            rec = PpfgData(
+                well_id=well_id,
+                columns_json=columns_json,
+                data_json=data_json,
+            )
+            session.add(rec)
+        session.commit()
+    finally:
+        session.close()
+
+
+def _delete_from_db(well_id: int):
+    """Remove PPFG data for a well."""
+    session = SessionLocal()
+    try:
+        rec = session.query(PpfgData).filter_by(well_id=well_id).first()
+        if rec:
+            session.delete(rec)
+            session.commit()
+    finally:
+        session.close()
+
+
+# ------------------------------------------------------------------
+# Page render
+# ------------------------------------------------------------------
+
 def render(well_name: str = "Well 1"):
     prefix = well_name.replace(" ", "_").lower()
     data_key = f"{prefix}_ppfg_data"
+    loaded_key = f"{prefix}_ppfg_loaded"
     paste_key = f"{prefix}_ppfg_paste"
+
+    well_id = _get_well_id(well_name)
+    if well_id is None:
+        st.warning("Well not found.")
+        return
+
+    # Load from DB into session_state on first visit
+    if not st.session_state.get(loaded_key):
+        saved = _load_from_db(well_id)
+        if saved is not None:
+            st.session_state[data_key] = saved
+        st.session_state[loaded_key] = True
 
     # ------------------------------------------------------------------
     # Collapsible data-input section
@@ -68,7 +155,6 @@ def render(well_name: str = "Well 1"):
         if st.button("Load Data", key=f"{prefix}_ppfg_load"):
             if pasted.strip():
                 try:
-                    from io import StringIO
                     df = pd.read_csv(StringIO(pasted), sep="\t")
                     df = _match_columns(df)
 
@@ -85,6 +171,7 @@ def render(well_name: str = "Well 1"):
                         # Drop columns that are entirely empty
                         df = df.dropna(axis=1, how="all")
                         st.session_state[data_key] = df
+                        _save_to_db(well_id, df)
                         st.rerun()
                 except Exception as exc:
                     st.error(f"Could not parse data: {exc}")
@@ -94,6 +181,7 @@ def render(well_name: str = "Well 1"):
         if st.session_state.get(data_key) is not None:
             if st.button("Clear Data", key=f"{prefix}_ppfg_clear"):
                 st.session_state.pop(data_key, None)
+                _delete_from_db(well_id)
                 st.rerun()
 
     # ------------------------------------------------------------------
