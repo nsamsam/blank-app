@@ -8,11 +8,11 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-const isProduction = process.env.NODE_ENV === "production";
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: false,
+  ssl: process.env.DATABASE_URL?.includes("railway")
+    ? { rejectUnauthorized: false }
+    : false,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
 });
