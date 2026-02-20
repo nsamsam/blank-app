@@ -52,7 +52,8 @@ def render(well_name: str = "Well 1"):
     # ------------------------------------------------------------------
     # Collapsible data-input section
     # ------------------------------------------------------------------
-    with st.expander("Input Data", expanded=not bool(st.session_state.get(data_key))):
+    has_data = data_key in st.session_state and st.session_state[data_key] is not None
+    with st.expander("Input Data", expanded=not has_data):
         st.caption(
             "Paste tab-separated data from Excel. "
             "Columns: **TVD** (required) plus any of: "
