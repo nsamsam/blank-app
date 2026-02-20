@@ -32,7 +32,7 @@ _WELL_COLUMNS_TO_ADD = [
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_wells_table()
-    _migrate_ppfg_data_table()
+    _migrate_json_data_tables()
 
 
 def _migrate_wells_table():
@@ -49,19 +49,23 @@ def _migrate_wells_table():
                 )
 
 
-_PPFG_EXPECTED_COLUMNS = {"id", "well_id", "columns_json", "data_json", "updated_at"}
+_JSON_DATA_EXPECTED_COLUMNS = {"id", "well_id", "columns_json", "data_json", "updated_at"}
+
+# Tables that use the standard JSON-data schema (id, well_id, columns_json, data_json, updated_at)
+_JSON_DATA_TABLES = ["ppfg_data", "directional_data"]
 
 
-def _migrate_ppfg_data_table():
-    """Recreate ppfg_data if schema is stale (extra/missing columns)."""
+def _migrate_json_data_tables():
+    """Recreate JSON-data tables if their schema is stale."""
     insp = inspect(engine)
-    if "ppfg_data" not in insp.get_table_names():
-        return
-    existing = {col["name"] for col in insp.get_columns("ppfg_data")}
-    if existing != _PPFG_EXPECTED_COLUMNS:
-        with engine.begin() as conn:
-            conn.execute(text("DROP TABLE ppfg_data"))
-        Base.metadata.tables["ppfg_data"].create(bind=engine)
+    for table_name in _JSON_DATA_TABLES:
+        if table_name not in insp.get_table_names():
+            continue
+        existing = {col["name"] for col in insp.get_columns(table_name)}
+        if existing != _JSON_DATA_EXPECTED_COLUMNS:
+            with engine.begin() as conn:
+                conn.execute(text(f"DROP TABLE {table_name}"))
+            Base.metadata.tables[table_name].create(bind=engine)
 
 
 if __name__ == "__main__":
