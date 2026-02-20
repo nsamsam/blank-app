@@ -91,25 +91,30 @@ def _load_ppfg_arrays(well_id: int):
     if not rows:
         return None, None, None
 
-    # Find column keys in row dicts
-    sample = rows[0] if rows else {}
+    # Find column keys — scan the saved column list first (authoritative),
+    # then fall back to row-dict keys for resilience.
     tvd_key = pp_key = fg_key = None
-    for k in sample.keys():
-        kl = k.strip().lower()
-        if kl == "tvd":
-            tvd_key = k
-        elif kl == "pp":
-            pp_key = k
-        elif "frac" in kl and "grad" in kl:
-            fg_key = k
 
-    # Fallback to exact column names
-    if tvd_key is None:
-        tvd_key = "TVD" if "TVD" in cols else None
-    if pp_key is None:
-        pp_key = "PP" if "PP" in cols else None
-    if fg_key is None:
-        fg_key = "Frac Grad" if "Frac Grad" in cols else None
+    # Scan the columns_json list (saved from df.columns)
+    for c in cols:
+        cl = c.strip().lower()
+        if cl == "tvd" and tvd_key is None:
+            tvd_key = c
+        elif (cl == "pp" or "pore" in cl) and pp_key is None:
+            pp_key = c
+        elif "frac" in cl and "grad" in cl and fg_key is None:
+            fg_key = c
+
+    # Also scan row-dict keys in case columns_json diverged
+    if rows:
+        for k in rows[0].keys():
+            kl = k.strip().lower()
+            if tvd_key is None and kl == "tvd":
+                tvd_key = k
+            if pp_key is None and (kl == "pp" or "pore" in kl):
+                pp_key = k
+            if fg_key is None and "frac" in kl and "grad" in kl:
+                fg_key = k
 
     if tvd_key is None:
         return None, None, None
