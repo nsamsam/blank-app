@@ -56,24 +56,65 @@ if st.sidebar.button("Log out"):
     st.session_state["authenticated"] = False
     st.rerun()
 
+# ---------------------------------------------------------------------------
+# Sidebar — Wells list
+# ---------------------------------------------------------------------------
 st.sidebar.title("Engineering Workbook")
-page = st.sidebar.radio(
-    "Navigate",
-    ["Well Info", "Projects", "Calculations", "Import Data", "New Entry"],
+
+# Initialise wells list in session state
+if "wells" not in st.session_state:
+    st.session_state["wells"] = ["Well 1"]
+if "active_well" not in st.session_state:
+    st.session_state["active_well"] = "Well 1"
+
+st.sidebar.subheader("Wells")
+
+# Add-well form
+with st.sidebar.expander("Add Well"):
+    new_well_name = st.text_input("Well name", key="new_well_input")
+    if st.button("Add", key="add_well_btn"):
+        name = new_well_name.strip()
+        if name and name not in st.session_state["wells"]:
+            st.session_state["wells"].append(name)
+            st.session_state["active_well"] = name
+            st.rerun()
+        elif name in st.session_state["wells"]:
+            st.sidebar.warning("Well already exists.")
+
+# Well selector
+active_well = st.sidebar.radio(
+    "Select Well",
+    st.session_state["wells"],
+    index=st.session_state["wells"].index(st.session_state["active_well"]),
+    key="well_selector",
+)
+st.session_state["active_well"] = active_well
+
+# ---------------------------------------------------------------------------
+# Main area — Tabs for each section
+# ---------------------------------------------------------------------------
+st.title(active_well)
+
+tab_well_info, tab_projects, tab_calculations, tab_import, tab_new_entry = st.tabs(
+    ["Well Info", "Projects", "Calculations", "Import Data", "New Entry"]
 )
 
-if page == "Well Info":
+with tab_well_info:
     from pages import well_info
-    well_info.render()
-elif page == "Projects":
+    well_info.render(active_well)
+
+with tab_projects:
     from pages import projects
     projects.render()
-elif page == "Calculations":
+
+with tab_calculations:
     from pages import calculations
     calculations.render()
-elif page == "Import Data":
+
+with tab_import:
     from pages import import_data
     import_data.render()
-elif page == "New Entry":
+
+with tab_new_entry:
     from pages import new_entry
     new_entry.render()
