@@ -360,7 +360,8 @@ def render(well_name: str = "Well 1"):
                           disabled=True, help="From Well Sections")
             st.text_input(
                 "Shoe PP (ppg)", key=f"{prefix}_shoe_pp", on_change=save,
-                help="Auto-filled from PPFG data (editable)" if has_ppfg else "Enter manually or load PPFG data",
+                disabled=has_ppfg and shoe_tvd_val is not None,
+                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
             )
         with d2:
             st.text_input("Bottom MD (ft)", value=f"{shoe_md_val:.1f}" if shoe_md_val else "",
