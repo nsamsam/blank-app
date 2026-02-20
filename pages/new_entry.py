@@ -369,13 +369,21 @@ def render(well_name: str = "Well 1"):
     tension_rating = _f(section.tension_rating)
 
     # --- Auto-fill Shoe PP, Shoe FG from PPFG, and TOC from Well Sections ---
-    if shoe_tvd_val is not None and has_ppfg:
-        pp_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_pp)
-        if pp_val is not None:
+    if has_ppfg:
+        # Shoe PP: use PP value at the bottom (deepest) TVD in the PPFG data
+        mask_pp = ~np.isnan(ppfg_pp)
+        if np.any(mask_pp):
+            tvd_pp_valid = ppfg_tvd[mask_pp]
+            pp_valid = ppfg_pp[mask_pp]
+            bottom_idx = np.argmax(tvd_pp_valid)
+            pp_val = float(pp_valid[bottom_idx])
             st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
-        fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
-        if fg_val is not None:
-            st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
+
+        # Shoe FG: still interpolated at shoe TVD
+        if shoe_tvd_val is not None:
+            fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
+            if fg_val is not None:
+                st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
 
     # Auto-fill Water Depth from Well Info
     if well_water_depth:
