@@ -59,12 +59,12 @@ if st.sidebar.button("Log out"):
 st.sidebar.title("Engineering Workbook")
 page = st.sidebar.radio(
     "Navigate",
-    ["Dashboard", "Projects", "Calculations", "Import Data", "New Entry"],
+    ["Well Info", "Projects", "Calculations", "Import Data", "New Entry"],
 )
 
-if page == "Dashboard":
-    from pages import dashboard
-    dashboard.render()
+if page == "Well Info":
+    from pages import well_info
+    well_info.render()
 elif page == "Projects":
     from pages import projects
     projects.render()
