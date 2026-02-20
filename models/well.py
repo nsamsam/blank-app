@@ -22,6 +22,8 @@ class Well(Base):
     rkb_msl: Mapped[str | None] = mapped_column("rkb_msl", String(100), nullable=True)
     rkb_ml: Mapped[str | None] = mapped_column("rkb_ml", String(100), nullable=True)
     rkb_wh: Mapped[str | None] = mapped_column("rkb_wh", String(100), nullable=True)
+    hpwhh_stickup: Mapped[str | None] = mapped_column("hpwhh_stickup", String(100), nullable=True)
+    lpwhh_stickup: Mapped[str | None] = mapped_column("lpwhh_stickup", String(100), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )

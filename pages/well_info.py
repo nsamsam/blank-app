@@ -16,6 +16,8 @@ _FIELDS = {
     "rkb_msl": "rkb_msl",
     "rkb_ml": "rkb_ml",
     "rkb_wh": "rkb_wh",
+    "hpwhh_stickup": "hpwhh_stickup",
+    "lpwhh_stickup": "lpwhh_stickup",
 }
 
 
@@ -92,8 +94,10 @@ def render(well_name: str = "Well 1"):
         st.text_input("Well", key=f"{prefix}_well", on_change=save)
         st.text_input("Water Depth", key=f"{prefix}_water_depth", on_change=_calc_rkb_ml)
         st.text_input("RKB-ML", key=f"{prefix}_rkb_ml", disabled=True, help="Auto-calculated: Water Depth + RKB-MSL")
+        st.text_input("HPWHH Stick up", key=f"{prefix}_hpwhh_stickup", on_change=save)
     with w2:
         st.text_input("Lease", key=f"{prefix}_lease", on_change=save)
         st.text_input("Name", key=f"{prefix}_name", on_change=save)
         st.text_input("RKB-MSL", key=f"{prefix}_rkb_msl", on_change=_calc_rkb_ml)
         st.text_input("RKB-WH", key=f"{prefix}_rkb_wh", on_change=save)
+        st.text_input("LPWHH Stick up", key=f"{prefix}_lpwhh_stickup", on_change=save)
