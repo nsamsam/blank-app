@@ -188,6 +188,15 @@ def _f(val) -> float | None:
         return None
 
 
+def _v(val, decimals=2, commas=False):
+    """Format a float for formula display, or '?' if None."""
+    if val is None:
+        return "?"
+    if commas:
+        return f"{val:,.{decimals}f}"
+    return f"{val:.{decimals}f}"
+
+
 def _calc_collapse(prefix: str, shoe_tvd: float | None):
     """Return (p_internal, p_external, collapse_load) or Nones."""
     rho_d = _f(st.session_state.get(f"{prefix}_rho_displace"))
@@ -393,14 +402,34 @@ def render(well_name: str = "Well 1"):
             st.text_input("SW / Mud Interval (ft)", key=f"{prefix}_tvd_sw", on_change=save,
                           help="TVD of seawater/mud column above cement")
 
+        # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
-        cr1, cr2, cr3 = st.columns(3)
-        with cr1:
-            st.metric("P internal (psi)", f"{p_int:,.0f}" if p_int is not None else "—")
-        with cr2:
-            st.metric("P external (psi)", f"{p_ext:,.0f}" if p_ext is not None else "—")
-        with cr3:
-            st.metric("Collapse Load (psi)", f"{c_load:,.0f}" if c_load is not None else "—")
+        rho_d = _f(st.session_state.get(f"{prefix}_rho_displace"))
+        rho_t = _f(st.session_state.get(f"{prefix}_rho_tail"))
+        tvd_t = _f(st.session_state.get(f"{prefix}_tvd_tail"))
+        rho_l = _f(st.session_state.get(f"{prefix}_rho_lead"))
+        tvd_l = _f(st.session_state.get(f"{prefix}_tvd_lead"))
+        tvd_s = _f(st.session_state.get(f"{prefix}_tvd_sw"))
+
+        st.markdown("**Calculations**")
+        lines = []
+        lines.append(f"P internal  = ρ_displace × 0.052 × Shoe TVD")
+        lines.append(f"            = {_v(rho_d)} × 0.052 × {_v(shoe_tvd_val, 1)}")
+        lines.append(f"            = {_v(p_int, 0, True)} psi")
+        lines.append("")
+        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_displace × SW Int)")
+        lines.append(f"            = (0.052 × {_v(rho_t)} × {_v(tvd_t, 1)}) + (0.052 × {_v(rho_l)} × {_v(tvd_l, 1)}) + (0.052 × {_v(rho_d)} × {_v(tvd_s, 1)})")
+        if p_ext is not None:
+            t1 = 0.052 * rho_t * tvd_t if None not in (rho_t, tvd_t) else None
+            t2 = 0.052 * rho_l * tvd_l if None not in (rho_l, tvd_l) else None
+            t3 = 0.052 * rho_d * tvd_s if None not in (rho_d, tvd_s) else None
+            lines.append(f"            = {_v(t1, 0, True)} + {_v(t2, 0, True)} + {_v(t3, 0, True)}")
+        lines.append(f"            = {_v(p_ext, 0, True)} psi")
+        lines.append("")
+        lines.append(f"Collapse Load = P external − P internal")
+        lines.append(f"              = {_v(p_ext, 0, True)} − {_v(p_int, 0, True)}")
+        lines.append(f"              = {_v(c_load, 0, True)} psi")
+        st.code("\n".join(lines), language=None)
 
         st.divider()
 
@@ -414,14 +443,25 @@ def render(well_name: str = "Well 1"):
             st.text_input("Formation Backup EMW (ppg)", key=f"{prefix}_backup_emw", on_change=save,
                           help="External formation pressure equivalent mud weight")
 
+        # Burst formula breakdown
         bp_int, bp_ext, b_load = _calc_burst(prefix, shoe_tvd_val)
-        br1, br2, br3 = st.columns(3)
-        with br1:
-            st.metric("P internal (psi)", f"{bp_int:,.0f}" if bp_int is not None else "—")
-        with br2:
-            st.metric("P external (psi)", f"{bp_ext:,.0f}" if bp_ext is not None else "—")
-        with br3:
-            st.metric("Burst Load (psi)", f"{b_load:,.0f}" if b_load is not None else "—")
+        emw = _f(st.session_state.get(f"{prefix}_burst_emw"))
+        backup = _f(st.session_state.get(f"{prefix}_backup_emw"))
+
+        st.markdown("**Calculations**")
+        lines = []
+        lines.append(f"P internal  = 0.052 × Applied EMW × Shoe TVD")
+        lines.append(f"            = 0.052 × {_v(emw)} × {_v(shoe_tvd_val, 1)}")
+        lines.append(f"            = {_v(bp_int, 0, True)} psi")
+        lines.append("")
+        lines.append(f"P external  = 0.052 × Backup EMW × Shoe TVD")
+        lines.append(f"            = 0.052 × {_v(backup)} × {_v(shoe_tvd_val, 1)}")
+        lines.append(f"            = {_v(bp_ext, 0, True)} psi")
+        lines.append("")
+        lines.append(f"Burst Load  = P internal − P external")
+        lines.append(f"            = {_v(bp_int, 0, True)} − {_v(bp_ext, 0, True)}")
+        lines.append(f"            = {_v(b_load, 0, True)} psi")
+        st.code("\n".join(lines), language=None)
 
         st.divider()
 
@@ -435,17 +475,28 @@ def render(well_name: str = "Well 1"):
         with t2:
             st.text_input("Overpull (lbs)", key=f"{prefix}_overpull", on_change=save)
 
+        # Tension formula breakdown
         t_load = _calc_tension(prefix, csg_wt_val, shoe_md_val, top_md_val, mud_wt_val)
         length = (shoe_md_val - top_md_val) if shoe_md_val and top_md_val else None
         bf = ((65.5 - mud_wt_val) / 65.5) if mud_wt_val else None
+        overpull = _f(st.session_state.get(f"{prefix}_overpull"))
+        buoyed_wt = (csg_wt_val * length * bf) if None not in (csg_wt_val, length, bf) else None
 
-        tr1, tr2, tr3 = st.columns(3)
-        with tr1:
-            st.metric("Casing Length (ft)", f"{length:,.0f}" if length else "—")
-        with tr2:
-            st.metric("Buoyancy Factor", f"{bf:.4f}" if bf else "—")
-        with tr3:
-            st.metric("Tension Load (lbs)", f"{t_load:,.0f}" if t_load is not None else "—")
+        st.markdown("**Calculations**")
+        lines = []
+        lines.append(f"Length          = Shoe MD − Top MD")
+        lines.append(f"                = {_v(shoe_md_val, 1)} − {_v(top_md_val, 1)}")
+        lines.append(f"                = {_v(length, 0, True)} ft")
+        lines.append("")
+        lines.append(f"Buoyancy Factor = (65.5 − Mud Wt) / 65.5")
+        lines.append(f"                = (65.5 − {_v(mud_wt_val)}) / 65.5")
+        lines.append(f"                = {_v(bf, 4)}")
+        lines.append("")
+        lines.append(f"Tension Load    = Csg Wt × Length × BF + Overpull")
+        lines.append(f"                = {_v(csg_wt_val)} × {_v(length, 0, True)} × {_v(bf, 4)} + {_v(overpull, 0, True)}")
+        lines.append(f"                = {_v(buoyed_wt, 0, True)} + {_v(overpull, 0, True)}")
+        lines.append(f"                = {_v(t_load, 0, True)} lbs")
+        st.code("\n".join(lines), language=None)
 
         st.divider()
 
@@ -458,6 +509,12 @@ def render(well_name: str = "Well 1"):
         collapse_sf = (collapse_rating / c_load) if collapse_rating and c_load and c_load != 0 else None
         burst_sf = (burst_rating / b_load) if burst_rating and b_load and b_load != 0 else None
         tension_sf = (tension_rating / t_load) if tension_rating and t_load and t_load != 0 else None
+
+        lines = []
+        lines.append(f"Collapse SF = Collapse Rating / Collapse Load  =  {_v(collapse_rating, 0, True)} / {_v(c_load, 0, True)}  =  {_v(collapse_sf, 2)}")
+        lines.append(f"Burst SF    = Burst Rating / Burst Load        =  {_v(burst_rating, 0, True)} / {_v(b_load, 0, True)}  =  {_v(burst_sf, 2)}")
+        lines.append(f"Tension SF  = Tension Rating / Tension Load    =  {_v(tension_rating, 0, True)} / {_v(t_load, 0, True)}  =  {_v(tension_sf, 2)}")
+        st.code("\n".join(lines), language=None)
 
         sf1, sf2, sf3 = st.columns(3)
         with sf1:
