@@ -48,7 +48,7 @@ def _get_or_create_design(section_id: int) -> CasingDesign:
     try:
         design = session.query(CasingDesign).filter_by(section_id=section_id).first()
         if not design:
-            design = CasingDesign(section_id=section_id, overpull="250000")
+            design = CasingDesign(section_id=section_id, overpull="250000", rho_displace="8.6")
             session.add(design)
             session.commit()
             # Re-query to get a detached copy with an id
@@ -390,8 +390,8 @@ def render(well_name: str = "Well 1"):
         st.markdown("**Collapse**")
         cc1, cc2, cc3 = st.columns(3)
         with cc1:
-            st.text_input("Displacing Fluid (ppg)", key=f"{prefix}_rho_displace", on_change=save,
-                          help="Seawater or displacement fluid density")
+            st.text_input("SW Density (ppg)", key=f"{prefix}_rho_displace", on_change=save,
+                          help="Seawater density (default 8.6)")
             st.text_input("Tail Cement (ppg)", key=f"{prefix}_rho_tail", on_change=save)
         with cc2:
             st.text_input("Lead Cement (ppg)", key=f"{prefix}_rho_lead", on_change=save)
@@ -413,11 +413,11 @@ def render(well_name: str = "Well 1"):
 
         st.markdown("**Calculations**")
         lines = []
-        lines.append(f"P internal  = ρ_displace × 0.052 × Shoe TVD")
+        lines.append(f"P internal  = ρ_SW × 0.052 × Shoe TVD")
         lines.append(f"            = {_v(rho_d)} × 0.052 × {_v(shoe_tvd_val, 1)}")
         lines.append(f"            = {_v(p_int, 0, True)} psi")
         lines.append("")
-        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_displace × SW Int)")
+        lines.append(f"P external  = (0.052 × ρ_tail × Tail Int) + (0.052 × ρ_lead × Lead Int) + (0.052 × ρ_SW × SW Int)")
         lines.append(f"            = (0.052 × {_v(rho_t)} × {_v(tvd_t, 1)}) + (0.052 × {_v(rho_l)} × {_v(tvd_l, 1)}) + (0.052 × {_v(rho_d)} × {_v(tvd_s, 1)})")
         if p_ext is not None:
             t1 = 0.052 * rho_t * tvd_t if None not in (rho_t, tvd_t) else None
