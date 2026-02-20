@@ -13,7 +13,7 @@ def render(well_name: str = "Well 1"):
     with g1:
         st.text_input("Date", value="", key=f"{prefix}_date", placeholder="MM/DD/YYYY")
         st.text_input("Rig", value="", key=f"{prefix}_rig")
-        st.text_input("Directional", value="", key=f"{prefix}_directional")
+        st.text_input("Directional Rev", value="", key=f"{prefix}_directional")
     with g2:
         st.text_input("Rev", value="", key=f"{prefix}_rev")
         st.text_input("Start Date", value="", key=f"{prefix}_start_date", placeholder="MM/DD/YYYY")
