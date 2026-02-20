@@ -143,13 +143,46 @@ def _load_survey_arrays(well_id: int):
 
 
 def _tvd_to_md(tvd_value: float, md_arr, tvd_arr) -> float | None:
-    """Interpolate MD from TVD using the directional survey arrays."""
-    if md_arr is None or tvd_arr is None:
+    """Interpolate MD from TVD by bracketing the target between two survey stations.
+
+    Finds the closest station above (TVD1, MD1) and below (TVD2, MD2) and applies:
+        MD = MD1 + (TVD_target - TVD1) / (TVD2 - TVD1) * (MD2 - MD1)
+    """
+    if md_arr is None or tvd_arr is None or len(md_arr) < 2:
         return None
-    try:
-        return float(np.interp(tvd_value, tvd_arr, md_arr))
-    except Exception:
+
+    n = len(tvd_arr)
+
+    # Exact match
+    for i in range(n):
+        if tvd_arr[i] == tvd_value:
+            return float(md_arr[i])
+
+    # Find the bracketing pair: last station with TVD <= target, first with TVD >= target
+    idx_above = None  # station above (shallower TVD)
+    idx_below = None  # station below (deeper TVD)
+
+    for i in range(n):
+        if tvd_arr[i] <= tvd_value:
+            if idx_above is None or tvd_arr[i] >= tvd_arr[idx_above]:
+                idx_above = i
+        if tvd_arr[i] >= tvd_value:
+            if idx_below is None or tvd_arr[i] <= tvd_arr[idx_below]:
+                idx_below = i
+
+    if idx_above is None or idx_below is None:
         return None
+    if idx_above == idx_below:
+        return float(md_arr[idx_above])
+
+    tvd1, md1 = tvd_arr[idx_above], md_arr[idx_above]
+    tvd2, md2 = tvd_arr[idx_below], md_arr[idx_below]
+
+    if tvd2 == tvd1:
+        return float(md1)
+
+    md_interp = md1 + (tvd_value - tvd1) / (tvd2 - tvd1) * (md2 - md1)
+    return float(md_interp)
 
 
 # ------------------------------------------------------------------
