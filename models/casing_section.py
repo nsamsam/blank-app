@@ -25,6 +25,8 @@ class CasingSection(Base):
     burst_rating: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tension_rating: Mapped[str | None] = mapped_column(String(100), nullable=True)
     thread: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    toc: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cement_length: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )

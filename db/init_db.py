@@ -38,6 +38,8 @@ _CASING_COLUMNS_TO_ADD = [
     ("burst_rating", "VARCHAR(100)"),
     ("tension_rating", "VARCHAR(100)"),
     ("thread", "VARCHAR(200)"),
+    ("toc", "VARCHAR(100)"),
+    ("cement_length", "VARCHAR(100)"),
 ]
 
 

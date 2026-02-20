@@ -19,18 +19,19 @@ _GENERAL_FIELDS = [
     ("casing_grade", "Casing Grade"),
     ("casing_id", "Casing ID (in)"),
     ("mud_weight", "Mud Wt (ppg)"),
+    ("thread", "Thread / Connection"),
 ]
 
 _RATING_FIELDS = [
     ("collapse_rating", "Collapse Rating (psi)"),
     ("burst_rating", "Burst Rating (psi)"),
     ("tension_rating", "Tension Rating (lbs)"),
-    ("thread", "Thread / Connection"),
 ]
 
-# All fields that get persisted (general + ratings + depth)
+# All fields that get persisted (general + ratings + depth + cement)
 _ALL_DB_FIELDS = [f for f, _ in _GENERAL_FIELDS] + [f for f, _ in _RATING_FIELDS] + [
     "section_name", "top_tvd", "top_md", "shoe_tvd", "shoe_md",
+    "toc", "cement_length",
 ]
 
 
@@ -272,8 +273,9 @@ def render(well_name: str = "Well 1"):
                 st.session_state[f"{prefix}_{db_col}"] = getattr(sec, db_col, None) or ""
             st.session_state[init_key] = True
 
-        # --- Compute auto-MD from TVD whenever TVD values change ---
-        def _recalc_md(sid=sec.id, pfx=prefix):
+        # --- Recompute derived fields (MD from TVD, cement length) ---
+        def _recalc_derived(sid=sec.id, pfx=prefix):
+            # MD from TVD
             for tvd_col, md_col in [("top_tvd", "top_md"), ("shoe_tvd", "shoe_md")]:
                 tvd_str = st.session_state.get(f"{pfx}_{tvd_col}", "")
                 try:
@@ -282,11 +284,26 @@ def render(well_name: str = "Well 1"):
                     st.session_state[f"{pfx}_{md_col}"] = f"{md_val:.1f}" if md_val is not None else ""
                 except (ValueError, TypeError):
                     st.session_state[f"{pfx}_{md_col}"] = ""
+            # Cement length = Setting Depth TVD − TOC
+            _calc_cement_length(pfx)
+            _save_section(sid, pfx)
+
+        def _calc_cement_length(pfx=prefix):
+            shoe_str = st.session_state.get(f"{pfx}_shoe_tvd", "")
+            toc_str = st.session_state.get(f"{pfx}_toc", "")
+            try:
+                cement_len = float(shoe_str) - float(toc_str)
+                st.session_state[f"{pfx}_cement_length"] = f"{cement_len:.1f}"
+            except (ValueError, TypeError):
+                st.session_state[f"{pfx}_cement_length"] = ""
+
+        def _on_toc_change(sid=sec.id, pfx=prefix):
+            _calc_cement_length(pfx)
             _save_section(sid, pfx)
 
         save = lambda sid=sec.id, pfx=prefix: _save_section(sid, pfx)
 
-        # Eagerly recompute MD values on each render so they stay current
+        # Eagerly recompute derived values on each render so they stay current
         for tvd_col, md_col in [("top_tvd", "top_md"), ("shoe_tvd", "shoe_md")]:
             tvd_str = st.session_state.get(f"{prefix}_{tvd_col}", "")
             try:
@@ -295,6 +312,7 @@ def render(well_name: str = "Well 1"):
                 st.session_state[f"{prefix}_{md_col}"] = f"{md_val:.1f}" if md_val is not None else ""
             except (ValueError, TypeError):
                 pass
+        _calc_cement_length(prefix)
 
         # --- Section header row: move buttons + expander + delete ---
         section_name = st.session_state.get(f"{prefix}_section_name", "") or f"Section {idx + 1}"
@@ -322,7 +340,7 @@ def render(well_name: str = "Well 1"):
                 # Section name
                 st.text_input("Section Name", key=f"{prefix}_section_name", on_change=save)
 
-                # General fields — 3 columns
+                # Casing Details — 3 columns (includes thread/connection)
                 st.markdown("**Casing Details**")
                 c1, c2, c3 = st.columns(3)
                 for i, (db_col, label_text) in enumerate(_GENERAL_FIELDS):
@@ -331,10 +349,10 @@ def render(well_name: str = "Well 1"):
 
                 st.divider()
 
-                # Rating fields
+                # Burst, Collapse & Tension
                 st.markdown("**Burst, Collapse & Tension**")
-                r1, r2, r3, r4 = st.columns(4)
-                for col_w, (db_col, label_text) in zip([r1, r2, r3, r4], _RATING_FIELDS):
+                r1, r2, r3 = st.columns(3)
+                for col_w, (db_col, label_text) in zip([r1, r2, r3], _RATING_FIELDS):
                     with col_w:
                         st.text_input(label_text, key=f"{prefix}_{db_col}", on_change=save)
 
@@ -347,7 +365,7 @@ def render(well_name: str = "Well 1"):
                     st.text_input(
                         "Top of Casing TVD (ft)",
                         key=f"{prefix}_top_tvd",
-                        on_change=_recalc_md,
+                        on_change=_recalc_derived,
                     )
                 with d2:
                     st.text_input(
@@ -360,7 +378,7 @@ def render(well_name: str = "Well 1"):
                     st.text_input(
                         "Setting Depth TVD (ft)",
                         key=f"{prefix}_shoe_tvd",
-                        on_change=_recalc_md,
+                        on_change=_recalc_derived,
                     )
                 with d4:
                     st.text_input(
@@ -372,6 +390,26 @@ def render(well_name: str = "Well 1"):
 
                 if not has_survey:
                     st.caption("MD values will auto-populate once a directional survey is loaded.")
+
+                st.divider()
+
+                # Cement section
+                st.markdown("**Cement**")
+                cm1, cm2 = st.columns(2)
+                with cm1:
+                    st.text_input(
+                        "TOC (ft)",
+                        key=f"{prefix}_toc",
+                        on_change=_on_toc_change,
+                        help="Top of Cement depth (ft)",
+                    )
+                with cm2:
+                    st.text_input(
+                        "Length of Cement (ft)",
+                        key=f"{prefix}_cement_length",
+                        disabled=True,
+                        help="Setting Depth TVD − TOC",
+                    )
 
                 # Delete button
                 st.divider()
