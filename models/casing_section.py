@@ -16,7 +16,9 @@ class CasingSection(Base):
     casing_weight: Mapped[str | None] = mapped_column(String(100), nullable=True)
     casing_grade: Mapped[str | None] = mapped_column(String(100), nullable=True)
     casing_id: Mapped[str | None] = mapped_column("casing_id_val", String(100), nullable=True)
+    top_tvd: Mapped[str | None] = mapped_column(String(100), nullable=True)
     top_md: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shoe_tvd: Mapped[str | None] = mapped_column(String(100), nullable=True)
     shoe_md: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mud_weight: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(

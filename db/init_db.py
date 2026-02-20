@@ -30,12 +30,19 @@ _WELL_COLUMNS_TO_ADD = [
 ]
 
 
+_CASING_COLUMNS_TO_ADD = [
+    ("top_tvd", "VARCHAR(100)"),
+    ("shoe_tvd", "VARCHAR(100)"),
+]
+
+
 def init_db():
     # Drop stale JSON-data tables BEFORE create_all, so they get recreated
     # with the correct schema. create_all skips tables that already exist.
     _drop_stale_json_data_tables()
     Base.metadata.create_all(bind=engine)
     _migrate_wells_table()
+    _migrate_casing_sections_table()
 
 
 def _migrate_wells_table():
@@ -49,6 +56,20 @@ def _migrate_wells_table():
             if col_name not in existing:
                 conn.execute(
                     text(f"ALTER TABLE wells ADD COLUMN {col_name} {col_type}")
+                )
+
+
+def _migrate_casing_sections_table():
+    """Add any missing columns to the existing casing_sections table."""
+    insp = inspect(engine)
+    if "casing_sections" not in insp.get_table_names():
+        return
+    existing = {col["name"] for col in insp.get_columns("casing_sections")}
+    with engine.begin() as conn:
+        for col_name, col_type in _CASING_COLUMNS_TO_ADD:
+            if col_name not in existing:
+                conn.execute(
+                    text(f"ALTER TABLE casing_sections ADD COLUMN {col_name} {col_type}")
                 )
 
 

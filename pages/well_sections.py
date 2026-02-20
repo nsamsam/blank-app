@@ -1,23 +1,35 @@
+import json
+
+import numpy as np
 import streamlit as st
+
 from db.connection import SessionLocal
-from models.well import Well
 from models.casing_section import CasingSection
+from models.directional_data import DirectionalData
+from models.well import Well
 
 # Default section templates when adding a new row
 _DEFAULT_SECTIONS = ["Conductor", "Surface", "Intermediate", "Production", "Liner"]
 
-_FIELDS = [
-    ("section_name", "Section Name"),
+# Fields displayed inside each expander (db_col, label)
+_GENERAL_FIELDS = [
     ("hole_size", "Hole Size (in)"),
     ("casing_od", "Casing OD (in)"),
     ("casing_weight", "Casing Wt (ppf)"),
     ("casing_grade", "Casing Grade"),
     ("casing_id", "Casing ID (in)"),
-    ("top_md", "Top MD (ft)"),
-    ("shoe_md", "Shoe MD (ft)"),
     ("mud_weight", "Mud Wt (ppg)"),
 ]
 
+# All fields that get persisted (general + depth)
+_ALL_DB_FIELDS = [f for f, _ in _GENERAL_FIELDS] + [
+    "section_name", "top_tvd", "top_md", "shoe_tvd", "shoe_md",
+]
+
+
+# ------------------------------------------------------------------
+# DB helpers
+# ------------------------------------------------------------------
 
 def _get_well_id(well_name: str) -> int | None:
     session = SessionLocal()
@@ -66,6 +78,19 @@ def _delete_section(section_id: int):
         session.close()
 
 
+def _swap_order(id_a: int, id_b: int):
+    """Swap order_index of two sections."""
+    session = SessionLocal()
+    try:
+        a = session.query(CasingSection).get(id_a)
+        b = session.query(CasingSection).get(id_b)
+        if a and b:
+            a.order_index, b.order_index = b.order_index, a.order_index
+            session.commit()
+    finally:
+        session.close()
+
+
 def _save_section(section_id: int, prefix: str):
     """Persist all field values from session state back to the DB."""
     session = SessionLocal()
@@ -73,7 +98,7 @@ def _save_section(section_id: int, prefix: str):
         section = session.query(CasingSection).get(section_id)
         if not section:
             return
-        for db_col, _ in _FIELDS:
+        for db_col in _ALL_DB_FIELDS:
             val = st.session_state.get(f"{prefix}_{db_col}", "")
             setattr(section, db_col, val)
         session.commit()
@@ -81,6 +106,55 @@ def _save_section(section_id: int, prefix: str):
         session.close()
     st.toast("Saved!")
 
+
+# ------------------------------------------------------------------
+# TVD → MD interpolation from directional survey
+# ------------------------------------------------------------------
+
+def _load_survey_arrays(well_id: int):
+    """Return (md_array, tvd_array) from the directional survey, or (None, None)."""
+    session = SessionLocal()
+    try:
+        rec = session.query(DirectionalData).filter_by(well_id=well_id).first()
+        if not rec:
+            return None, None
+        cols = json.loads(rec.columns_json)
+        rows = json.loads(rec.data_json)
+    finally:
+        session.close()
+
+    if not rows or "MD (ft)" not in cols or "TVD (ft)" not in cols:
+        return None, None
+
+    md_list, tvd_list = [], []
+    for row in rows:
+        md_val = row.get("MD (ft)")
+        tvd_val = row.get("TVD (ft)")
+        try:
+            md_list.append(float(md_val))
+            tvd_list.append(float(tvd_val))
+        except (TypeError, ValueError):
+            continue
+
+    if len(md_list) < 2:
+        return None, None
+
+    return np.array(md_list), np.array(tvd_list)
+
+
+def _tvd_to_md(tvd_value: float, md_arr, tvd_arr) -> float | None:
+    """Interpolate MD from TVD using the directional survey arrays."""
+    if md_arr is None or tvd_arr is None:
+        return None
+    try:
+        return float(np.interp(tvd_value, tvd_arr, md_arr))
+    except Exception:
+        return None
+
+
+# ------------------------------------------------------------------
+# UI
+# ------------------------------------------------------------------
 
 def render(well_name: str = "Well 1"):
     well_id = _get_well_id(well_name)
@@ -90,62 +164,129 @@ def render(well_name: str = "Well 1"):
 
     st.subheader("Well Sections")
 
-    # --- Add section controls ---
-    col_add, col_template = st.columns([1, 2])
-    with col_add:
-        if st.button("+ Add Section", type="primary"):
-            existing = _load_sections(well_id)
-            next_idx = len(existing)
-            # Pick a default name based on position
-            default_name = _DEFAULT_SECTIONS[next_idx] if next_idx < len(_DEFAULT_SECTIONS) else ""
-            _add_section(well_id, section_name=default_name, order_index=next_idx)
-            st.rerun()
+    # Pre-load directional survey for TVD→MD interpolation
+    md_arr, tvd_arr = _load_survey_arrays(well_id)
+    has_survey = md_arr is not None
 
-    # --- Load and render sections ---
+    if st.button("+ Add Section", type="primary"):
+        existing = _load_sections(well_id)
+        next_idx = len(existing)
+        default_name = _DEFAULT_SECTIONS[next_idx] if next_idx < len(_DEFAULT_SECTIONS) else ""
+        _add_section(well_id, section_name=default_name, order_index=next_idx)
+        st.rerun()
+
     sections = _load_sections(well_id)
 
     if not sections:
         st.info("No casing sections yet. Click **+ Add Section** to get started.")
         return
 
-    # Column headers
-    hdr_cols = st.columns([1.2, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.4])
-    headers = [label for _, label in _FIELDS] + [""]
-    for col, hdr in zip(hdr_cols, headers):
-        col.markdown(f"**{hdr}**")
-
-    st.divider()
-
-    # Render each section as a row of inputs
-    for sec in sections:
+    for idx, sec in enumerate(sections):
         prefix = f"cs_{sec.id}"
-        # Initialize session state from DB values (once)
         init_key = f"{prefix}_loaded"
+
+        # Initialize session state from DB values once
         if not st.session_state.get(init_key):
-            for db_col, _ in _FIELDS:
+            for db_col in _ALL_DB_FIELDS:
                 st.session_state[f"{prefix}_{db_col}"] = getattr(sec, db_col, None) or ""
             st.session_state[init_key] = True
 
+        # --- Compute auto-MD from TVD whenever TVD values change ---
+        def _recalc_md(sid=sec.id, pfx=prefix):
+            for tvd_col, md_col in [("top_tvd", "top_md"), ("shoe_tvd", "shoe_md")]:
+                tvd_str = st.session_state.get(f"{pfx}_{tvd_col}", "")
+                try:
+                    tvd_val = float(tvd_str)
+                    md_val = _tvd_to_md(tvd_val, md_arr, tvd_arr)
+                    st.session_state[f"{pfx}_{md_col}"] = f"{md_val:.1f}" if md_val is not None else ""
+                except (ValueError, TypeError):
+                    st.session_state[f"{pfx}_{md_col}"] = ""
+            _save_section(sid, pfx)
+
         save = lambda sid=sec.id, pfx=prefix: _save_section(sid, pfx)
 
-        row_cols = st.columns([1.2, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.4])
+        # Eagerly recompute MD values on each render so they stay current
+        for tvd_col, md_col in [("top_tvd", "top_md"), ("shoe_tvd", "shoe_md")]:
+            tvd_str = st.session_state.get(f"{prefix}_{tvd_col}", "")
+            try:
+                tvd_val = float(tvd_str)
+                md_val = _tvd_to_md(tvd_val, md_arr, tvd_arr)
+                st.session_state[f"{prefix}_{md_col}"] = f"{md_val:.1f}" if md_val is not None else ""
+            except (ValueError, TypeError):
+                pass
 
-        for col, (db_col, label) in zip(row_cols[:-1], _FIELDS):
-            with col:
-                st.text_input(
-                    label,
-                    key=f"{prefix}_{db_col}",
-                    on_change=save,
-                    label_visibility="collapsed",
-                )
+        # --- Section header row: move buttons + expander + delete ---
+        section_name = st.session_state.get(f"{prefix}_section_name", "") or f"Section {idx + 1}"
+        shoe_tvd_display = st.session_state.get(f"{prefix}_shoe_tvd", "")
+        label = f"{section_name}"
+        if shoe_tvd_display:
+            label += f"  —  Shoe TVD: {shoe_tvd_display} ft"
 
-        with row_cols[-1]:
-            if st.button("🗑", key=f"{prefix}_del", help="Delete this section"):
-                _delete_section(sec.id)
-                # Clear session state for this section
-                for db_col, _ in _FIELDS:
-                    st.session_state.pop(f"{prefix}_{db_col}", None)
-                st.session_state.pop(init_key, None)
-                st.rerun()
+        btn_col, expand_col = st.columns([0.08, 0.92])
 
-        st.divider()
+        with btn_col:
+            if idx > 0:
+                if st.button("▲", key=f"{prefix}_up", help="Move up"):
+                    prev = sections[idx - 1]
+                    _swap_order(sec.id, prev.id)
+                    st.rerun()
+            if idx < len(sections) - 1:
+                if st.button("▼", key=f"{prefix}_down", help="Move down"):
+                    nxt = sections[idx + 1]
+                    _swap_order(sec.id, nxt.id)
+                    st.rerun()
+
+        with expand_col:
+            with st.expander(label):
+                # Section name
+                st.text_input("Section Name", key=f"{prefix}_section_name", on_change=save)
+
+                # General fields — 3 columns
+                c1, c2, c3 = st.columns(3)
+                for i, (db_col, label_text) in enumerate(_GENERAL_FIELDS):
+                    with [c1, c2, c3][i % 3]:
+                        st.text_input(label_text, key=f"{prefix}_{db_col}", on_change=save)
+
+                st.divider()
+
+                # Depth fields — TVD (editable) → MD (auto)
+                st.markdown("**Depths**")
+                d1, d2, d3, d4 = st.columns(4)
+                with d1:
+                    st.text_input(
+                        "Top of Casing TVD (ft)",
+                        key=f"{prefix}_top_tvd",
+                        on_change=_recalc_md,
+                    )
+                with d2:
+                    st.text_input(
+                        "Top MD (ft)",
+                        key=f"{prefix}_top_md",
+                        disabled=True,
+                        help="Auto from directional survey" if has_survey else "No survey loaded",
+                    )
+                with d3:
+                    st.text_input(
+                        "Setting Depth TVD (ft)",
+                        key=f"{prefix}_shoe_tvd",
+                        on_change=_recalc_md,
+                    )
+                with d4:
+                    st.text_input(
+                        "Shoe MD (ft)",
+                        key=f"{prefix}_shoe_md",
+                        disabled=True,
+                        help="Auto from directional survey" if has_survey else "No survey loaded",
+                    )
+
+                if not has_survey:
+                    st.caption("MD values will auto-populate once a directional survey is loaded.")
+
+                # Delete button
+                st.divider()
+                if st.button("Delete Section", key=f"{prefix}_del", type="secondary"):
+                    _delete_section(sec.id)
+                    for db_col in _ALL_DB_FIELDS:
+                        st.session_state.pop(f"{prefix}_{db_col}", None)
+                    st.session_state.pop(init_key, None)
+                    st.rerun()
