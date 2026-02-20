@@ -306,9 +306,12 @@ def render(well_name: str = "Well 1"):
     if section_toc:
         st.session_state[f"{prefix}_toc"] = section_toc
 
-    # Auto-fill Shoe MW from mud weight
-    if mud_wt_val is not None:
-        st.session_state[f"{prefix}_shoe_mw"] = f"{mud_wt_val}"
+    # Auto-compute Lead Cement Interval = TOC − Tail Cement Interval
+    toc_val = _f(st.session_state.get(f"{prefix}_toc"))
+    tvd_tail_val = _f(st.session_state.get(f"{prefix}_tvd_tail"))
+    if toc_val is not None and tvd_tail_val is not None:
+        lead_interval = toc_val - tvd_tail_val
+        st.session_state[f"{prefix}_tvd_lead"] = f"{lead_interval:.1f}"
 
     # Persist auto-filled values
     _save_design_quiet(design.id, prefix)
@@ -343,14 +346,12 @@ def render(well_name: str = "Well 1"):
                           disabled=True, help="From Well Sections")
             st.text_input(
                 "Shoe PP (ppg)", key=f"{prefix}_shoe_pp", on_change=save,
-                disabled=has_ppfg and shoe_tvd_val is not None,
-                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
+                help="Auto-filled from PPFG data (editable)" if has_ppfg else "Enter manually or load PPFG data",
             )
         with d2:
             st.text_input("Bottom MD (ft)", value=f"{shoe_md_val:.1f}" if shoe_md_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("Shoe MW (ppg)", key=f"{prefix}_shoe_mw", on_change=save,
-                          disabled=True, help="From Well Sections mud weight")
+            st.text_input("Shoe MW (ppg)", key=f"{prefix}_shoe_mw", on_change=save)
         with d3:
             st.text_input("Top TVD (ft)", value=f"{top_tvd_val:.1f}" if top_tvd_val else "",
                           disabled=True, help="From Well Sections")
@@ -382,7 +383,8 @@ def render(well_name: str = "Well 1"):
             st.text_input("Lead Cement (ppg)", key=f"{prefix}_rho_lead", on_change=save)
             st.text_input("Tail Cement Interval (ft)", key=f"{prefix}_tvd_tail", on_change=save)
         with cc3:
-            st.text_input("Lead Cement Interval (ft)", key=f"{prefix}_tvd_lead", on_change=save)
+            st.text_input("Lead Cement Interval (ft)", key=f"{prefix}_tvd_lead",
+                          disabled=True, help="Auto: TOC − Tail Cement Interval")
             st.text_input("SW / Mud Interval (ft)", key=f"{prefix}_tvd_sw", on_change=save,
                           help="TVD of seawater/mud column above cement")
 
