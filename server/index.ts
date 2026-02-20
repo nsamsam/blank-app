@@ -14,6 +14,11 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// Health check — no session middleware, always responds
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", db: !!process.env.DATABASE_URL });
+});
+
 if (!process.env.DATABASE_URL) {
   // No database configured — serve a setup message instead of crashing
   app.use((_req, res) => {

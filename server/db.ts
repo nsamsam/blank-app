@@ -8,13 +8,23 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+// Railway private networking (.railway.internal) does NOT support SSL.
+// Railway public URLs (rlwy.net) require SSL.
+const dbUrl = process.env.DATABASE_URL || "";
+const useSSL = dbUrl.includes("rlwy.net") ? { rejectUnauthorized: false } : false;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("railway")
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: useSSL,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
+});
+
+// Test connection on startup
+pool.query("SELECT 1").then(() => {
+  console.log("Database connected successfully");
+}).catch((err) => {
+  console.error("Database connection failed:", err.message);
 });
 
 export const db = drizzle(pool, { schema });

@@ -20,11 +20,12 @@ declare global {
 
 export function setupAuth(app: Express) {
   const PgSession = connectPgSimple(session);
+  const dbUrl = process.env.DATABASE_URL || "";
+  const useSSL = dbUrl.includes("rlwy.net") ? { rejectUnauthorized: false } : false;
+
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes("railway")
-      ? { rejectUnauthorized: false }
-      : false,
+    ssl: useSSL,
     connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 30000,
   });
