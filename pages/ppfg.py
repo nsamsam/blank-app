@@ -2,7 +2,46 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-_SAMPLE_HINT = "Depth\tPore Pressure\tFrac Gradient\n1000\t8.6\t12.5\n2000\t9.0\t13.0"
+# Expected columns — TVD is required, all others are optional
+PPFG_COLUMNS = [
+    "TVD",
+    "MW-0deg breakout",
+    "PP",
+    "Min H",
+    "Frac Grad",
+    "Frac Int",
+    "OBG",
+    "95% OBG",
+    "90% OBG",
+    "85% OBG",
+    "750psi over OBG",
+    "1000psi over OBG",
+]
+
+_HEADER_LINE = "\t".join(PPFG_COLUMNS)
+_SAMPLE_HINT = (
+    f"{_HEADER_LINE}\n"
+    "1000\t\t8.6\t\t12.5\t\t14.0\t\t\t\n"
+    "2000\t\t9.0\t\t13.0\t\t15.0\t\t\t"
+)
+
+
+def _normalize_col(name: str) -> str:
+    """Lowercase + strip for fuzzy column matching."""
+    return name.strip().lower()
+
+
+def _match_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Try to map pasted columns to the expected PPFG columns."""
+    norm_map = {_normalize_col(c): c for c in PPFG_COLUMNS}
+    rename = {}
+    for col in df.columns:
+        normed = _normalize_col(col)
+        if normed in norm_map:
+            rename[col] = norm_map[normed]
+    if rename:
+        df = df.rename(columns=rename)
+    return df
 
 
 def render(well_name: str = "Well 1"):
@@ -16,7 +55,9 @@ def render(well_name: str = "Well 1"):
     with st.expander("Input Data", expanded=not bool(st.session_state.get(data_key))):
         st.caption(
             "Paste tab-separated data from Excel. "
-            "First column = Depth (TVD). Remaining columns are plotted as curves."
+            "Columns: **TVD** (required) plus any of: "
+            + ", ".join(PPFG_COLUMNS[1:])
+            + ". Leave columns blank if not available."
         )
         pasted = st.text_area(
             "Paste data here",
@@ -29,9 +70,20 @@ def render(well_name: str = "Well 1"):
                 try:
                     from io import StringIO
                     df = pd.read_csv(StringIO(pasted), sep="\t")
-                    if df.shape[1] < 2:
-                        st.error("Need at least two columns (Depth + one curve).")
+                    df = _match_columns(df)
+
+                    # Validate TVD column exists
+                    if "TVD" not in df.columns:
+                        st.error(
+                            "Could not find a **TVD** column. "
+                            "Make sure the first column header is 'TVD'."
+                        )
                     else:
+                        # Convert to numeric, coerce blanks to NaN
+                        for col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors="coerce")
+                        # Drop columns that are entirely empty
+                        df = df.dropna(axis=1, how="all")
                         st.session_state[data_key] = df
                         st.rerun()
                 except Exception as exc:
@@ -50,29 +102,29 @@ def render(well_name: str = "Well 1"):
     df: pd.DataFrame | None = st.session_state.get(data_key)
 
     if df is not None and not df.empty:
-        depth_col = df.columns[0]
-        curve_cols = df.columns[1:]
+        depth_col = "TVD"
+        curve_cols = [c for c in df.columns if c != depth_col and df[c].notna().any()]
 
         fig = go.Figure()
         for col in curve_cols:
+            series = df[[depth_col, col]].dropna()
             fig.add_trace(go.Scatter(
-                x=df[col],
-                y=df[depth_col],
+                x=series[col],
+                y=series[depth_col],
                 mode="lines+markers",
                 name=col,
             ))
 
         fig.update_layout(
             title="PPFG Plot",
-            xaxis_title="Pressure / Gradient",
-            yaxis_title=depth_col,
-            yaxis=dict(autorange="reversed"),  # depth increases downward
+            xaxis_title="Pressure / Gradient (ppg)",
+            yaxis_title="TVD (ft)",
+            yaxis=dict(autorange="reversed"),
             height=700,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Show data table below chart
         with st.expander("View Data Table"):
             st.dataframe(df, use_container_width=True)
     else:
