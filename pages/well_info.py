@@ -18,6 +18,8 @@ _FIELDS = {
     "rkb_wh": "rkb_wh",
     "hpwhh_stickup": "hpwhh_stickup",
     "lpwhh_stickup": "lpwhh_stickup",
+    "rkb_to_lpwhh": "rkb_to_lpwhh",
+    "rkb_to_hpwhh": "rkb_to_hpwhh",
 }
 
 
@@ -57,14 +59,28 @@ def render(well_name: str = "Well 1"):
     # Load DB values into session state on first visit for this well
     _init_session_state(well_name, prefix)
 
-    def _calc_rkb_ml():
-        """RKB-ML = Water Depth + RKB-MSL. Recalculate and autosave."""
+    def _recalc_derived():
+        """Recalculate all derived fields (RKB-ML, RKB to LPWHH, RKB to HPWHH) and autosave."""
         wd = st.session_state.get(f"{prefix}_water_depth", "")
         msl = st.session_state.get(f"{prefix}_rkb_msl", "")
         try:
-            st.session_state[f"{prefix}_rkb_ml"] = str(float(wd) + float(msl))
+            rkb_ml = float(wd) + float(msl)
+            st.session_state[f"{prefix}_rkb_ml"] = str(rkb_ml)
         except (ValueError, TypeError):
-            pass
+            rkb_ml = None
+
+        if rkb_ml is not None:
+            lp = st.session_state.get(f"{prefix}_lpwhh_stickup", "")
+            try:
+                st.session_state[f"{prefix}_rkb_to_lpwhh"] = str(rkb_ml - float(lp))
+            except (ValueError, TypeError):
+                pass
+            hp = st.session_state.get(f"{prefix}_hpwhh_stickup", "")
+            try:
+                st.session_state[f"{prefix}_rkb_to_hpwhh"] = str(rkb_ml - float(hp))
+            except (ValueError, TypeError):
+                pass
+
         _autosave(well_name, prefix)
 
     save = lambda: _autosave(well_name, prefix)
@@ -92,12 +108,13 @@ def render(well_name: str = "Well 1"):
     with w1:
         st.text_input("Block", key=f"{prefix}_block", on_change=save)
         st.text_input("Well", key=f"{prefix}_well", on_change=save)
-        st.text_input("Water Depth", key=f"{prefix}_water_depth", on_change=_calc_rkb_ml)
-        st.text_input("RKB-ML", key=f"{prefix}_rkb_ml", disabled=True, help="Auto-calculated: Water Depth + RKB-MSL")
-        st.text_input("HPWHH Stick up", key=f"{prefix}_hpwhh_stickup", on_change=save)
+        st.text_input("Water Depth", key=f"{prefix}_water_depth", on_change=_recalc_derived)
+        st.text_input("RKB-ML", key=f"{prefix}_rkb_ml", disabled=True, help="Auto: Water Depth + RKB-MSL")
+        st.text_input("HPWHH Stick up", key=f"{prefix}_hpwhh_stickup", on_change=_recalc_derived)
+        st.text_input("RKB to HPWHH", key=f"{prefix}_rkb_to_hpwhh", disabled=True, help="Auto: RKB-ML − HPWHH Stick up")
     with w2:
         st.text_input("Lease", key=f"{prefix}_lease", on_change=save)
         st.text_input("Name", key=f"{prefix}_name", on_change=save)
-        st.text_input("RKB-MSL", key=f"{prefix}_rkb_msl", on_change=_calc_rkb_ml)
-        st.text_input("RKB-WH", key=f"{prefix}_rkb_wh", on_change=save)
-        st.text_input("LPWHH Stick up", key=f"{prefix}_lpwhh_stickup", on_change=save)
+        st.text_input("RKB-MSL", key=f"{prefix}_rkb_msl", on_change=_recalc_derived)
+        st.text_input("LPWHH Stick up", key=f"{prefix}_lpwhh_stickup", on_change=_recalc_derived)
+        st.text_input("RKB to LPWHH", key=f"{prefix}_rkb_to_lpwhh", disabled=True, help="Auto: RKB-ML − LPWHH Stick up")

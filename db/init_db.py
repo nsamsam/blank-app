@@ -21,6 +21,8 @@ _WELL_COLUMNS_TO_ADD = [
     ("rkb_wh", "VARCHAR(100)"),
     ("hpwhh_stickup", "VARCHAR(100)"),
     ("lpwhh_stickup", "VARCHAR(100)"),
+    ("rkb_to_lpwhh", "VARCHAR(100)"),
+    ("rkb_to_hpwhh", "VARCHAR(100)"),
     ("updated_at", "TIMESTAMP"),
 ]
 
