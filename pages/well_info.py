@@ -55,6 +55,16 @@ def render(well_name: str = "Well 1"):
     # Load DB values into session state on first visit for this well
     _init_session_state(well_name, prefix)
 
+    def _calc_rkb_ml():
+        """RKB-ML = Water Depth + RKB-MSL. Recalculate and autosave."""
+        wd = st.session_state.get(f"{prefix}_water_depth", "")
+        msl = st.session_state.get(f"{prefix}_rkb_msl", "")
+        try:
+            st.session_state[f"{prefix}_rkb_ml"] = str(float(wd) + float(msl))
+        except (ValueError, TypeError):
+            pass
+        _autosave(well_name, prefix)
+
     save = lambda: _autosave(well_name, prefix)
 
     # -------------------------------------------------------------------
@@ -80,10 +90,10 @@ def render(well_name: str = "Well 1"):
     with w1:
         st.text_input("Block", key=f"{prefix}_block", on_change=save)
         st.text_input("Well", key=f"{prefix}_well", on_change=save)
-        st.text_input("Water Depth", key=f"{prefix}_water_depth", on_change=save)
-        st.text_input("RKB-ML", key=f"{prefix}_rkb_ml", on_change=save)
+        st.text_input("Water Depth", key=f"{prefix}_water_depth", on_change=_calc_rkb_ml)
+        st.text_input("RKB-ML", key=f"{prefix}_rkb_ml", disabled=True, help="Auto-calculated: Water Depth + RKB-MSL")
     with w2:
         st.text_input("Lease", key=f"{prefix}_lease", on_change=save)
         st.text_input("Name", key=f"{prefix}_name", on_change=save)
-        st.text_input("RKB-MSL", key=f"{prefix}_rkb_msl", on_change=save)
+        st.text_input("RKB-MSL", key=f"{prefix}_rkb_msl", on_change=_calc_rkb_ml)
         st.text_input("RKB-WH", key=f"{prefix}_rkb_wh", on_change=save)
