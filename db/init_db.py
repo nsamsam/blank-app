@@ -48,25 +48,19 @@ def _migrate_wells_table():
                 )
 
 
-_PPFG_COLUMNS_TO_ADD = [
-    ("columns_json", "TEXT DEFAULT '[]'"),
-    ("data_json", "TEXT DEFAULT '[]'"),
-    ("updated_at", "TIMESTAMP"),
-]
+_PPFG_EXPECTED_COLUMNS = {"id", "well_id", "columns_json", "data_json", "updated_at"}
 
 
 def _migrate_ppfg_data_table():
-    """Add any missing columns to the existing ppfg_data table."""
+    """Recreate ppfg_data if schema is stale (extra/missing columns)."""
     insp = inspect(engine)
     if "ppfg_data" not in insp.get_table_names():
         return
     existing = {col["name"] for col in insp.get_columns("ppfg_data")}
-    with engine.begin() as conn:
-        for col_name, col_type in _PPFG_COLUMNS_TO_ADD:
-            if col_name not in existing:
-                conn.execute(
-                    text(f"ALTER TABLE ppfg_data ADD COLUMN {col_name} {col_type}")
-                )
+    if existing != _PPFG_EXPECTED_COLUMNS:
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE ppfg_data"))
+        Base.metadata.tables["ppfg_data"].create(bind=engine)
 
 
 if __name__ == "__main__":
