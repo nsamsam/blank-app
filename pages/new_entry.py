@@ -232,6 +232,14 @@ def _md_to_tvd(target_md: float, md_arr, tvd_arr) -> float | None:
     return float(np.interp(target_md, md_sorted, tvd_sorted))
 
 
+def _closest_tvd_for_md(target_md: float, md_arr, tvd_arr) -> float | None:
+    """Find the survey station whose MD is closest to target_md and return its TVD."""
+    if md_arr is None or tvd_arr is None or len(md_arr) < 1:
+        return None
+    idx = int(np.argmin(np.abs(md_arr - target_md)))
+    return float(tvd_arr[idx])
+
+
 # ------------------------------------------------------------------
 # Calculation helpers
 # ------------------------------------------------------------------
@@ -405,22 +413,19 @@ def render(well_name: str = "Well 1"):
         md_lead_interval = toc_val - md_tail_val
         st.session_state[f"{prefix}_md_lead"] = f"{md_lead_interval:.1f}"
 
-    # Auto-compute TVD intervals from MD using directional survey interpolation
+    # Auto-compute TVD intervals from MD using closest survey station
     _lead_tvd_auto = False
-    if has_survey and shoe_md_val is not None:
+    if has_survey:
         if md_tail_val is not None:
-            top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
-            if shoe_tvd_val is not None and top_tail_tvd is not None:
-                st.session_state[f"{prefix}_tvd_tail"] = f"{shoe_tvd_val - top_tail_tvd:.1f}"
+            tvd_val = _closest_tvd_for_md(md_tail_val, survey_md, survey_tvd)
+            if tvd_val is not None:
+                st.session_state[f"{prefix}_tvd_tail"] = f"{tvd_val:.1f}"
 
         md_lead_v = _f(st.session_state.get(f"{prefix}_md_lead"))
-        if md_tail_val is not None and md_lead_v is not None:
-            # Interpolate TVD at the top-of-tail and top-of-lead absolute MD positions
-            top_tail_tvd = _md_to_tvd(shoe_md_val - md_tail_val, survey_md, survey_tvd)
-            top_lead_md = shoe_md_val - md_tail_val - md_lead_v
-            top_lead_tvd = _md_to_tvd(top_lead_md, survey_md, survey_tvd)
-            if top_tail_tvd is not None and top_lead_tvd is not None:
-                st.session_state[f"{prefix}_tvd_lead"] = f"{top_tail_tvd - top_lead_tvd:.1f}"
+        if md_lead_v is not None:
+            tvd_val = _closest_tvd_for_md(md_lead_v, survey_md, survey_tvd)
+            if tvd_val is not None:
+                st.session_state[f"{prefix}_tvd_lead"] = f"{tvd_val:.1f}"
                 _lead_tvd_auto = True
 
     # Persist auto-filled values
@@ -462,7 +467,7 @@ def render(well_name: str = "Well 1"):
         with d2:
             st.text_input("Bottom MD (ft)", value=f"{shoe_md_val:.1f}" if shoe_md_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("Shoe MW (ppg)", key=f"{prefix}_shoe_mw", on_change=save)
+            st.text_input("MW at TD (ppg)", key=f"{prefix}_shoe_mw", on_change=save)
         with d3:
             st.text_input("Top TVD (ft)", value=f"{top_tvd_val:.1f}" if top_tvd_val else "",
                           disabled=True, help="From Well Sections")
@@ -501,7 +506,7 @@ def render(well_name: str = "Well 1"):
         with cc3:
             st.markdown("<div style='height:56px'></div>", unsafe_allow_html=True)
             st.text_input("Tail Cement Interval TVD (ft)", key=f"{prefix}_tvd_tail",
-                          disabled=has_survey and shoe_md_val is not None,
+                          disabled=has_survey and md_tail_val is not None,
                           help="Auto from directional survey" if has_survey else "Enter manually or load survey")
             st.text_input("Lead Cement Interval TVD (ft)", key=f"{prefix}_tvd_lead",
                           disabled=_lead_tvd_auto,
