@@ -416,10 +416,12 @@ def render(well_name: str = "Well 1"):
     # Auto-compute TVD intervals from MD using closest survey station
     _lead_tvd_auto = False
     if has_survey:
-        if md_tail_val is not None:
-            tvd_val = _closest_tvd_for_md(md_tail_val, survey_md, survey_tvd)
-            if tvd_val is not None:
-                st.session_state[f"{prefix}_tvd_tail"] = f"{tvd_val:.1f}"
+        if md_tail_val is not None and shoe_md_val is not None and shoe_tvd_val is not None:
+            calculated_md = shoe_md_val - md_tail_val
+            found_tvd = _closest_tvd_for_md(calculated_md, survey_md, survey_tvd)
+            if found_tvd is not None:
+                tail_tvd_interval = shoe_tvd_val - found_tvd
+                st.session_state[f"{prefix}_tvd_tail"] = f"{tail_tvd_interval:.1f}"
 
         md_lead_v = _f(st.session_state.get(f"{prefix}_md_lead"))
         if md_lead_v is not None:
@@ -488,8 +490,8 @@ def render(well_name: str = "Well 1"):
 
         st.divider()
 
-        # --- Collapse ---
-        st.markdown("**Collapse**")
+        # --- Cement ---
+        st.markdown("**Cement**")
         cc1, cc2, cc3, cc4 = st.columns(4)
         with cc1:
             st.text_input("SW Density (ppg)", key=f"{prefix}_rho_displace", on_change=save,
