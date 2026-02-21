@@ -150,8 +150,12 @@ def render(well_name: str = "Well 1"):
                     else:
                         df.columns = DIRECTIONAL_COLUMNS[:num_cols]
                         for col in df.columns:
+                            df[col] = df[col].astype(str).str.strip().str.replace(",", "", regex=False)
                             df[col] = pd.to_numeric(df[col], errors="coerce")
                         df = df.dropna(axis=1, how="all")
+                        missing = [c for c in ["MD (ft)", "TVD (ft)"] if c not in df.columns]
+                        if missing:
+                            st.warning(f"Could not parse columns: {', '.join(missing)}. Check your data format.")
                         st.session_state[data_key] = df
                         _save_to_db(well_id, df)
                         st.rerun()
