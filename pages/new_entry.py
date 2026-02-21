@@ -405,12 +405,11 @@ def render(well_name: str = "Well 1"):
         st.session_state[f"{prefix}_toc"] = section_toc
 
     # Auto-compute cement intervals: user enters MD, system looks up TVD
-    toc_val = _f(st.session_state.get(f"{prefix}_toc"))
     md_tail_val = _f(st.session_state.get(f"{prefix}_md_tail"))
 
-    # Auto-compute Lead Cement MD interval = TOC − Tail Cement MD interval
-    if toc_val is not None and md_tail_val is not None:
-        md_lead_interval = toc_val - md_tail_val
+    # Auto-compute Lead Cement MD interval = Bottom MD − Top MD − Tail Cement MD interval
+    if shoe_md_val is not None and top_md_val is not None and md_tail_val is not None:
+        md_lead_interval = shoe_md_val - top_md_val - md_tail_val
         st.session_state[f"{prefix}_md_lead"] = f"{md_lead_interval:.1f}"
 
     # Auto-compute TVD intervals from MD using closest survey station
