@@ -100,7 +100,7 @@ def _load_ppfg_arrays(well_id: int):
         cl = c.strip().lower()
         if cl == "tvd" and tvd_key is None:
             tvd_key = c
-        elif (cl == "pp" or "pore" in cl) and pp_key is None:
+        elif (cl == "pp" or cl.startswith("pp") or "pore" in cl) and pp_key is None:
             pp_key = c
         elif "frac" in cl and "grad" in cl and fg_key is None:
             fg_key = c
@@ -111,7 +111,7 @@ def _load_ppfg_arrays(well_id: int):
             kl = k.strip().lower()
             if tvd_key is None and kl == "tvd":
                 tvd_key = k
-            if pp_key is None and (kl == "pp" or "pore" in kl):
+            if pp_key is None and (kl == "pp" or kl.startswith("pp") or "pore" in kl):
                 pp_key = k
             if fg_key is None and "frac" in kl and "grad" in kl:
                 fg_key = k
