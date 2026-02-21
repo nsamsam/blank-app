@@ -370,16 +370,18 @@ def render(well_name: str = "Well 1"):
 
     # --- Auto-fill Shoe PP, Shoe FG from PPFG, and TOC from Well Sections ---
     if has_ppfg:
-        # Shoe PP: use PP value at the bottom (deepest) TVD in the PPFG data
-        mask_pp = ~np.isnan(ppfg_pp)
-        if np.any(mask_pp):
-            tvd_pp_valid = ppfg_tvd[mask_pp]
-            pp_valid = ppfg_pp[mask_pp]
-            bottom_idx = np.argmax(tvd_pp_valid)
-            pp_val = float(pp_valid[bottom_idx])
-            st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
+        # Shoe PP: find the PPFG row whose TVD is closest to the Bottom TVD,
+        # then use that row's PP value.
+        if shoe_tvd_val is not None:
+            mask_pp = ~np.isnan(ppfg_pp)
+            if np.any(mask_pp):
+                tvd_pp_valid = ppfg_tvd[mask_pp]
+                pp_valid = ppfg_pp[mask_pp]
+                closest_idx = int(np.argmin(np.abs(tvd_pp_valid - shoe_tvd_val)))
+                pp_val = float(pp_valid[closest_idx])
+                st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
 
-        # Shoe FG: still interpolated at shoe TVD
+        # Shoe FG: interpolated at shoe TVD
         if shoe_tvd_val is not None:
             fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
             if fg_val is not None:
