@@ -479,7 +479,7 @@ def render(well_name: str = "Well 1"):
         if None not in (rho_d_auto, tvd_sw_auto, mw_td_auto, shoe_tvd_val) and shoe_tvd_val != 0:
             _emw_auto = True
             if not _is_manual(prefix, "burst_emw"):
-                calc_emw = ((0.052 * tvd_sw_auto * rho_d_auto) + (mw_td_auto * 0.052 * (shoe_tvd_val - tvd_sw_auto))) / (shoe_tvd_val / 0.052)
+                calc_emw = ((0.052 * tvd_sw_auto * rho_d_auto) + (mw_td_auto * 0.052 * (shoe_tvd_val - tvd_sw_auto))) / (0.052 * shoe_tvd_val)
                 st.session_state[f"{prefix}_burst_emw"] = f"{calc_emw:.2f}"
     _can_auto["burst_emw"] = _emw_auto
 
@@ -638,12 +638,12 @@ def render(well_name: str = "Well 1"):
             emw_disp = _f(st.session_state.get(f"{prefix}_burst_emw"))
             sw_press = (0.052 * tvd_sw_disp * rho_d_disp) if None not in (rho_d_disp, tvd_sw_disp) else None
             mud_press = (mw_td_disp * 0.052 * (shoe_tvd_val - tvd_sw_disp)) if None not in (mw_td_disp, shoe_tvd_val, tvd_sw_disp) else None
-            total_denom = (shoe_tvd_val / 0.052) if shoe_tvd_val else None
+            total_denom = (0.052 * shoe_tvd_val) if shoe_tvd_val else None
 
             st.markdown("**Applied EMW Formula**")
             lines = []
-            lines.append(f"Applied EMW = ((0.052 × Water Depth × SW Density) + (MW at TD × 0.052 × (Bottom TVD − Water Depth))) / (Bottom TVD / 0.052)")
-            lines.append(f"            = ((0.052 × {_v(tvd_sw_disp, 1)} × {_v(rho_d_disp)}) + ({_v(mw_td_disp)} × 0.052 × ({_v(shoe_tvd_val, 1)} − {_v(tvd_sw_disp, 1)}))) / ({_v(shoe_tvd_val, 1)} / 0.052)")
+            lines.append(f"Applied EMW = ((0.052 × Water Depth × SW Density) + (MW at TD × 0.052 × (Bottom TVD − Water Depth))) / (0.052 × Bottom TVD)")
+            lines.append(f"            = ((0.052 × {_v(tvd_sw_disp, 1)} × {_v(rho_d_disp)}) + ({_v(mw_td_disp)} × 0.052 × ({_v(shoe_tvd_val, 1)} − {_v(tvd_sw_disp, 1)}))) / (0.052 × {_v(shoe_tvd_val, 1)})")
             lines.append(f"            = ({_v(sw_press, 2)} + {_v(mud_press, 2)}) / {_v(total_denom, 2)}")
             lines.append(f"            = {_v(emw_disp)} ppg")
             st.code("\n".join(lines), language=None)
