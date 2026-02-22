@@ -261,6 +261,32 @@ def _v(val, decimals=2, commas=False):
     return f"{val:.{decimals}f}"
 
 
+def _is_manual(prefix: str, field: str) -> bool:
+    """Check if a field has been manually overridden."""
+    return st.session_state.get(f"{prefix}_{field}_manual", False)
+
+
+def _set_manual(prefix: str, field: str, manual: bool):
+    """Set the manual override flag for a field."""
+    st.session_state[f"{prefix}_{field}_manual"] = manual
+
+
+def _make_auto_save(design_id: int, prefix: str, field: str):
+    """Callback factory for auto-calc fields: tracks manual override + saves."""
+    def cb():
+        val = st.session_state.get(f"{prefix}_{field}", "").strip()
+        _set_manual(prefix, field, bool(val))
+        _save_design(design_id, prefix)
+    return cb
+
+
+def _auto_label(label: str, prefix: str, field: str, can_auto: bool) -> str:
+    """Prefix label with ':blue[Auto]' when field is auto-calculated (not manually overridden)."""
+    if can_auto and not _is_manual(prefix, field):
+        return f":blue[Auto]  {label}"
+    return label
+
+
 def _calc_collapse(prefix: str, shoe_tvd: float | None):
     """Return (p_internal, p_external, collapse_load) or Nones."""
     rho_d = _f(st.session_state.get(f"{prefix}_rho_displace"))
@@ -378,57 +404,71 @@ def render(well_name: str = "Well 1"):
     section_name_lower = (section.section_name or "").strip().lower()
 
     # --- Auto-fill Shoe PP, Shoe FG from PPFG, and TOC from Well Sections ---
+    _can_auto = {}
+
     if has_ppfg:
         # Shoe PP: find the PPFG row whose TVD is closest to the Bottom TVD,
         # then use that row's PP value.
         if shoe_tvd_val is not None:
             mask_pp = ~np.isnan(ppfg_pp)
             if np.any(mask_pp):
-                tvd_pp_valid = ppfg_tvd[mask_pp]
-                pp_valid = ppfg_pp[mask_pp]
-                closest_idx = int(np.argmin(np.abs(tvd_pp_valid - shoe_tvd_val)))
-                pp_val = float(pp_valid[closest_idx])
-                st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
+                _can_auto["shoe_pp"] = True
+                if not _is_manual(prefix, "shoe_pp"):
+                    tvd_pp_valid = ppfg_tvd[mask_pp]
+                    pp_valid = ppfg_pp[mask_pp]
+                    closest_idx = int(np.argmin(np.abs(tvd_pp_valid - shoe_tvd_val)))
+                    pp_val = float(pp_valid[closest_idx])
+                    st.session_state[f"{prefix}_shoe_pp"] = f"{pp_val:.2f}"
 
         # Shoe FG: interpolated at shoe TVD
         if shoe_tvd_val is not None:
             fg_val = _interp_at_tvd(shoe_tvd_val, ppfg_tvd, ppfg_fg)
             if fg_val is not None:
-                st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
+                _can_auto["shoe_fg"] = True
+                if not _is_manual(prefix, "shoe_fg"):
+                    st.session_state[f"{prefix}_shoe_fg"] = f"{fg_val:.2f}"
 
     # Auto-fill Water Depth from Well Info
-    if well_water_depth:
+    section_toc = section.toc or ""
+    _can_auto["tvd_sw"] = bool(well_water_depth)
+    _can_auto["toc"] = bool(section_toc)
+
+    if well_water_depth and not _is_manual(prefix, "tvd_sw"):
         st.session_state[f"{prefix}_tvd_sw"] = well_water_depth
 
     # Auto-fill TOC from well sections
-    section_toc = section.toc or ""
-    if section_toc:
+    if section_toc and not _is_manual(prefix, "toc"):
         st.session_state[f"{prefix}_toc"] = section_toc
 
     # Auto-compute cement intervals: user enters MD, system looks up TVD
     md_tail_val = _f(st.session_state.get(f"{prefix}_md_tail"))
 
     # Auto-compute Lead Cement MD interval = Bottom MD − Top MD − Tail Cement MD interval
-    if shoe_md_val is not None and top_md_val is not None and md_tail_val is not None:
+    _can_auto["md_lead"] = shoe_md_val is not None and top_md_val is not None and md_tail_val is not None
+    if _can_auto["md_lead"] and not _is_manual(prefix, "md_lead"):
         md_lead_interval = shoe_md_val - top_md_val - md_tail_val
         st.session_state[f"{prefix}_md_lead"] = f"{md_lead_interval:.1f}"
 
     # Auto-compute TVD intervals from MD using closest survey station
-    _lead_tvd_auto = False
+    _can_auto["tvd_tail"] = False
+    _can_auto["tvd_lead"] = False
     if has_survey:
         if md_tail_val is not None and shoe_md_val is not None and shoe_tvd_val is not None:
             calculated_md = shoe_md_val - md_tail_val
             found_tvd = _closest_tvd_for_md(calculated_md, survey_md, survey_tvd)
             if found_tvd is not None:
-                tail_tvd_interval = shoe_tvd_val - found_tvd
-                st.session_state[f"{prefix}_tvd_tail"] = f"{tail_tvd_interval:.1f}"
+                _can_auto["tvd_tail"] = True
+                if not _is_manual(prefix, "tvd_tail"):
+                    tail_tvd_interval = shoe_tvd_val - found_tvd
+                    st.session_state[f"{prefix}_tvd_tail"] = f"{tail_tvd_interval:.1f}"
 
         md_lead_v = _f(st.session_state.get(f"{prefix}_md_lead"))
         if md_lead_v is not None:
             tvd_val = _closest_tvd_for_md(md_lead_v, survey_md, survey_tvd)
             if tvd_val is not None:
-                st.session_state[f"{prefix}_tvd_lead"] = f"{tvd_val:.1f}"
-                _lead_tvd_auto = True
+                _can_auto["tvd_lead"] = True
+                if not _is_manual(prefix, "tvd_lead"):
+                    st.session_state[f"{prefix}_tvd_lead"] = f"{tvd_val:.1f}"
 
     # Auto-calculate Applied EMW for Conductor and Surface sections
     _emw_auto = False
@@ -437,9 +477,11 @@ def render(well_name: str = "Well 1"):
         tvd_sw_auto = _f(st.session_state.get(f"{prefix}_tvd_sw"))
         mw_td_auto = _f(st.session_state.get(f"{prefix}_shoe_mw"))
         if None not in (rho_d_auto, tvd_sw_auto, mw_td_auto, shoe_tvd_val) and shoe_tvd_val != 0:
-            calc_emw = ((rho_d_auto * tvd_sw_auto * mw_td_auto) + (mw_td_auto * 0.052 * (shoe_tvd_val - tvd_sw_auto))) / (shoe_tvd_val / 0.052)
-            st.session_state[f"{prefix}_burst_emw"] = f"{calc_emw:.2f}"
             _emw_auto = True
+            if not _is_manual(prefix, "burst_emw"):
+                calc_emw = ((rho_d_auto * tvd_sw_auto * mw_td_auto) + (mw_td_auto * 0.052 * (shoe_tvd_val - tvd_sw_auto))) / (shoe_tvd_val / 0.052)
+                st.session_state[f"{prefix}_burst_emw"] = f"{calc_emw:.2f}"
+    _can_auto["burst_emw"] = _emw_auto
 
     # Persist auto-filled values
     _save_design_quiet(design.id, prefix)
@@ -473,9 +515,10 @@ def render(well_name: str = "Well 1"):
             st.text_input("Bottom TVD (ft)", value=f"{shoe_tvd_val:.1f}" if shoe_tvd_val else "",
                           disabled=True, help="From Well Sections")
             st.text_input(
-                "Shoe PP (ppg)", key=f"{prefix}_shoe_pp", on_change=save,
-                disabled=has_ppfg and shoe_tvd_val is not None,
-                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
+                _auto_label("Shoe PP (ppg)", prefix, "shoe_pp", _can_auto.get("shoe_pp")),
+                key=f"{prefix}_shoe_pp",
+                on_change=_make_auto_save(design.id, prefix, "shoe_pp"),
+                help="Auto from PPFG — clear to restore" if _can_auto.get("shoe_pp") else "Enter manually or load PPFG data",
             )
         with d2:
             st.text_input("Bottom MD (ft)", value=f"{shoe_md_val:.1f}" if shoe_md_val else "",
@@ -485,16 +528,20 @@ def render(well_name: str = "Well 1"):
             st.text_input("Top TVD (ft)", value=f"{top_tvd_val:.1f}" if top_tvd_val else "",
                           disabled=True, help="From Well Sections")
             st.text_input(
-                "Shoe FG (ppg)", key=f"{prefix}_shoe_fg", on_change=save,
-                disabled=has_ppfg and shoe_tvd_val is not None,
-                help="Auto from PPFG data" if has_ppfg else "Enter manually or load PPFG data",
+                _auto_label("Shoe FG (ppg)", prefix, "shoe_fg", _can_auto.get("shoe_fg")),
+                key=f"{prefix}_shoe_fg",
+                on_change=_make_auto_save(design.id, prefix, "shoe_fg"),
+                help="Auto from PPFG — clear to restore" if _can_auto.get("shoe_fg") else "Enter manually or load PPFG data",
             )
         with d4:
             st.text_input("Top MD (ft)", value=f"{top_md_val:.1f}" if top_md_val else "",
                           disabled=True, help="From Well Sections")
-            st.text_input("TOC (ft)", key=f"{prefix}_toc", on_change=save,
-                          disabled=bool(section_toc),
-                          help="Auto from Well Sections" if section_toc else "Enter manually or set in Well Sections")
+            st.text_input(
+                _auto_label("TOC (ft)", prefix, "toc", _can_auto.get("toc")),
+                key=f"{prefix}_toc",
+                on_change=_make_auto_save(design.id, prefix, "toc"),
+                help="Auto from Well Sections — clear to restore" if _can_auto.get("toc") else "Enter manually or set in Well Sections",
+            )
 
         if not has_ppfg:
             st.caption("Load PPFG data in the **PPFG** tab to auto-fill Shoe PP and Shoe FG.")
@@ -510,20 +557,33 @@ def render(well_name: str = "Well 1"):
             st.text_input("Tail Cement (ppg)", key=f"{prefix}_rho_tail", on_change=save)
             st.text_input("Lead Cement (ppg)", key=f"{prefix}_rho_lead", on_change=save)
         with cc2:
-            st.text_input("Water Depth (ft)", key=f"{prefix}_tvd_sw", on_change=save,
-                          disabled=bool(well_water_depth),
-                          help="Auto from Well Info" if well_water_depth else "Enter manually or set in Well Info")
+            st.text_input(
+                _auto_label("Water Depth (ft)", prefix, "tvd_sw", _can_auto.get("tvd_sw")),
+                key=f"{prefix}_tvd_sw",
+                on_change=_make_auto_save(design.id, prefix, "tvd_sw"),
+                help="Auto from Well Info — clear to restore" if _can_auto.get("tvd_sw") else "Enter manually or set in Well Info",
+            )
             st.text_input("Tail Cement Interval MD (ft)", key=f"{prefix}_md_tail", on_change=save)
-            st.text_input("Lead Cement Interval MD (ft)", key=f"{prefix}_md_lead",
-                          disabled=True, help="Auto: TOC − Tail Cement MD")
+            st.text_input(
+                _auto_label("Lead Cement Interval MD (ft)", prefix, "md_lead", _can_auto.get("md_lead")),
+                key=f"{prefix}_md_lead",
+                on_change=_make_auto_save(design.id, prefix, "md_lead"),
+                help="Auto: Bottom MD - Top MD - Tail MD — clear to restore" if _can_auto.get("md_lead") else "Enter manually",
+            )
         with cc3:
             st.markdown("<div style='height:56px'></div>", unsafe_allow_html=True)
-            st.text_input("Tail Cement Interval TVD (ft)", key=f"{prefix}_tvd_tail",
-                          disabled=has_survey and md_tail_val is not None,
-                          help="Auto from directional survey" if has_survey else "Enter manually or load survey")
-            st.text_input("Lead Cement Interval TVD (ft)", key=f"{prefix}_tvd_lead",
-                          disabled=_lead_tvd_auto,
-                          help="Auto from directional survey" if _lead_tvd_auto else "Enter manually or load survey")
+            st.text_input(
+                _auto_label("Tail Cement Interval TVD (ft)", prefix, "tvd_tail", _can_auto.get("tvd_tail")),
+                key=f"{prefix}_tvd_tail",
+                on_change=_make_auto_save(design.id, prefix, "tvd_tail"),
+                help="Auto from directional survey — clear to restore" if _can_auto.get("tvd_tail") else "Enter manually or load survey",
+            )
+            st.text_input(
+                _auto_label("Lead Cement Interval TVD (ft)", prefix, "tvd_lead", _can_auto.get("tvd_lead")),
+                key=f"{prefix}_tvd_lead",
+                on_change=_make_auto_save(design.id, prefix, "tvd_lead"),
+                help="Auto from directional survey — clear to restore" if _can_auto.get("tvd_lead") else "Enter manually or load survey",
+            )
 
         # Collapse formula breakdown
         p_int, p_ext, c_load = _calc_collapse(prefix, shoe_tvd_val)
@@ -560,8 +620,12 @@ def render(well_name: str = "Well 1"):
         st.markdown("**Burst**")
         b1, b2 = st.columns(2)
         with b1:
-            st.text_input("Applied EMW (ppg)", key=f"{prefix}_burst_emw", on_change=save,
-                          help="Auto-calculated for Conductor/Surface sections" if _emw_auto else "Internal pressure equivalent mud weight")
+            st.text_input(
+                _auto_label("Applied EMW (ppg)", prefix, "burst_emw", _can_auto.get("burst_emw")),
+                key=f"{prefix}_burst_emw",
+                on_change=_make_auto_save(design.id, prefix, "burst_emw"),
+                help="Auto-calculated for Conductor/Surface — clear to restore" if _can_auto.get("burst_emw") else "Internal pressure equivalent mud weight",
+            )
         with b2:
             st.text_input("Formation Backup EMW (ppg)", key=f"{prefix}_backup_emw", on_change=save,
                           help="External formation pressure equivalent mud weight")
