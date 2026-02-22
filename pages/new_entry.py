@@ -566,6 +566,24 @@ def render(well_name: str = "Well 1"):
             st.text_input("Formation Backup EMW (ppg)", key=f"{prefix}_backup_emw", on_change=save,
                           help="External formation pressure equivalent mud weight")
 
+        # Applied EMW formula breakdown (Conductor / Surface only)
+        if _emw_auto:
+            rho_d_disp = _f(st.session_state.get(f"{prefix}_rho_displace"))
+            tvd_sw_disp = _f(st.session_state.get(f"{prefix}_tvd_sw"))
+            mw_td_disp = _f(st.session_state.get(f"{prefix}_shoe_mw"))
+            emw_disp = _f(st.session_state.get(f"{prefix}_burst_emw"))
+            sw_press = (rho_d_disp * 0.052 * tvd_sw_disp) if None not in (rho_d_disp, tvd_sw_disp) else None
+            mud_press = (mw_td_disp * 0.052 * (shoe_tvd_val - tvd_sw_disp)) if None not in (mw_td_disp, shoe_tvd_val, tvd_sw_disp) else None
+            total_denom = (0.052 * shoe_tvd_val) if shoe_tvd_val else None
+
+            st.markdown("**Applied EMW Formula**")
+            lines = []
+            lines.append(f"Applied EMW = (SW Density × 0.052 × Water Depth + MW at TD × 0.052 × (Shoe TVD − Water Depth)) / (0.052 × Shoe TVD)")
+            lines.append(f"            = ({_v(rho_d_disp)} × 0.052 × {_v(tvd_sw_disp, 1)} + {_v(mw_td_disp)} × 0.052 × ({_v(shoe_tvd_val, 1)} − {_v(tvd_sw_disp, 1)})) / (0.052 × {_v(shoe_tvd_val, 1)})")
+            lines.append(f"            = ({_v(sw_press, 2)} + {_v(mud_press, 2)}) / {_v(total_denom, 2)}")
+            lines.append(f"            = {_v(emw_disp)} ppg")
+            st.code("\n".join(lines), language=None)
+
         # Burst formula breakdown
         bp_int, bp_ext, b_load = _calc_burst(prefix, shoe_tvd_val)
         emw = _f(st.session_state.get(f"{prefix}_burst_emw"))
