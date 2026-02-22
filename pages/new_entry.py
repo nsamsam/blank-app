@@ -375,6 +375,7 @@ def render(well_name: str = "Well 1"):
     collapse_rating = _f(section.collapse_rating)
     burst_rating = _f(section.burst_rating)
     tension_rating = _f(section.tension_rating)
+    section_name_lower = (section.section_name or "").strip().lower()
 
     # --- Auto-fill Shoe PP, Shoe FG from PPFG, and TOC from Well Sections ---
     if has_ppfg:
@@ -428,6 +429,17 @@ def render(well_name: str = "Well 1"):
             if tvd_val is not None:
                 st.session_state[f"{prefix}_tvd_lead"] = f"{tvd_val:.1f}"
                 _lead_tvd_auto = True
+
+    # Auto-calculate Applied EMW for Conductor and Surface sections
+    _emw_auto = False
+    if section_name_lower in ("conductor", "surface"):
+        rho_d_auto = _f(st.session_state.get(f"{prefix}_rho_displace"))
+        tvd_sw_auto = _f(st.session_state.get(f"{prefix}_tvd_sw"))
+        mw_td_auto = _f(st.session_state.get(f"{prefix}_shoe_mw"))
+        if None not in (rho_d_auto, tvd_sw_auto, mw_td_auto, shoe_tvd_val) and shoe_tvd_val != 0:
+            calc_emw = ((rho_d_auto * 0.052 * tvd_sw_auto) + (mw_td_auto * 0.052 * shoe_tvd_val)) / (0.052 * shoe_tvd_val)
+            st.session_state[f"{prefix}_burst_emw"] = f"{calc_emw:.2f}"
+            _emw_auto = True
 
     # Persist auto-filled values
     _save_design_quiet(design.id, prefix)
@@ -549,7 +561,7 @@ def render(well_name: str = "Well 1"):
         b1, b2 = st.columns(2)
         with b1:
             st.text_input("Applied EMW (ppg)", key=f"{prefix}_burst_emw", on_change=save,
-                          help="Internal pressure equivalent mud weight")
+                          help="Auto-calculated for Conductor/Surface sections" if _emw_auto else "Internal pressure equivalent mud weight")
         with b2:
             st.text_input("Formation Backup EMW (ppg)", key=f"{prefix}_backup_emw", on_change=save,
                           help="External formation pressure equivalent mud weight")
