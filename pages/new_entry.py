@@ -437,7 +437,7 @@ def render(well_name: str = "Well 1"):
         tvd_sw_auto = _f(st.session_state.get(f"{prefix}_tvd_sw"))
         mw_td_auto = _f(st.session_state.get(f"{prefix}_shoe_mw"))
         if None not in (rho_d_auto, tvd_sw_auto, mw_td_auto, shoe_tvd_val) and shoe_tvd_val != 0:
-            calc_emw = ((rho_d_auto * 0.052 * tvd_sw_auto) + (mw_td_auto * 0.052 * shoe_tvd_val)) / (0.052 * shoe_tvd_val)
+            calc_emw = ((rho_d_auto * 0.052 * tvd_sw_auto) + (mw_td_auto * 0.052 * (shoe_tvd_val - tvd_sw_auto))) / (0.052 * shoe_tvd_val)
             st.session_state[f"{prefix}_burst_emw"] = f"{calc_emw:.2f}"
             _emw_auto = True
 
