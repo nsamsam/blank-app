@@ -220,7 +220,7 @@ elif page == "Data Overlay":
     st.markdown("Overlay Excel data on real-time API data for comparison and analysis.")
 
     tables = get_all_tables()
-    data_tables = [t for t in tables if t not in ("api_config", "channels", "datasets", "sqlite_sequence")]
+    data_tables = [t for t in tables if t not in ("api_config", "channels", "datasets")]
 
     if len(data_tables) < 1:
         st.warning("Upload Excel data or fetch API data first to use the overlay feature.")
@@ -315,7 +315,7 @@ elif page == "SQL Workbook":
 
     query = st.text_area(
         "SQL Query",
-        value="SELECT name FROM sqlite_master WHERE type='table';",
+        value="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public';",
         height=150,
         help="Write any SELECT query. Only read-only queries are supported.",
     )
@@ -336,7 +336,7 @@ elif page == "SQL Workbook":
     st.divider()
     st.subheader("Quick Queries")
     templates = {
-        "Show all tables": "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+        "Show all tables": "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;",
         "API Connections": "SELECT id, name, base_url, auth_type, created_at FROM api_config;",
         "Excel Datasets": "SELECT id, name, source, row_count, created_at FROM datasets;",
         "Real-time Data (latest 50)": "SELECT * FROM realtime_data ORDER BY timestamp DESC LIMIT 50;",
