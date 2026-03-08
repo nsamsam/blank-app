@@ -10,6 +10,22 @@ from database import (
 from api_client import PetroVaultClient, create_client
 
 st.set_page_config(page_title="Engineering Data Workbook", layout="wide")
+
+# --- Password Protection ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("Login")
+    password = st.text_input("Enter password", type="password")
+    if st.button("Login"):
+        if password == "NS":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
 init_db()
 
 # --- Sidebar Navigation ---
