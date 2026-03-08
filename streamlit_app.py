@@ -180,23 +180,29 @@ elif page == "Well Model":
             st.subheader("Wells")
             col1, col2 = st.columns(2)
             with col1:
-                wells_page = st.number_input("Page", min_value=1, value=1, key="wells_page")
+                wells_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wells_limit")
             with col2:
-                wells_size = st.number_input("Page Size", min_value=10, max_value=500, value=50, key="wells_size")
+                wells_fetch = st.text_input("Fetch parts", placeholder="properties,parents,model",
+                                             help="Comma-separated: properties, parents, model, data", key="wells_fetch")
 
             if st.button("Fetch Wells", key="btn_wells"):
                 with st.spinner("Fetching wells..."):
-                    data, err = client.get_wells(page=wells_page, page_size=wells_size)
+                    data, err = client.get_wells(
+                        limit=wells_limit,
+                        fetch=wells_fetch if wells_fetch else None,
+                    )
                 if err:
                     st.error(err)
                 elif data:
-                    st.json(data) if not isinstance(data, list) else None
-                    df, _ = PetroVaultClient._to_dataframe(data)
+                    paging = PetroVaultClient._extract_paging(data)
+                    flat = PetroVaultClient._flatten_resource_items(data)
+                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
                     if df is not None and not df.empty:
                         st.dataframe(df, use_container_width=True)
                         st.session_state["wells_df"] = df
+                        if paging.get("hasMore"):
+                            st.info(f"Page {paging.get('pageNumber')} — more results available (cursor: `{paging.get('cursor')}`)")
 
-                        # Store option
                         if st.button("Store Wells to DB", key="store_wells"):
                             table = store_excel_data(f"wells_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
                             st.success(f"Stored as `{table}`")
@@ -206,24 +212,26 @@ elif page == "Well Model":
         # --- Wellbores Tab ---
         with tab_wellbores:
             st.subheader("Wellbores")
-            well_filter = st.text_input("Filter by Well (ID or name)", key="wb_well_filter",
+            well_filter = st.text_input("Filter by Well UID", key="wb_well_filter",
                                          help="Leave empty to get all wellbores")
             col1, col2 = st.columns(2)
             with col1:
-                wb_page = st.number_input("Page", min_value=1, value=1, key="wb_page")
+                wb_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wb_limit")
             with col2:
-                wb_size = st.number_input("Page Size", min_value=10, max_value=500, value=50, key="wb_size")
+                wb_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="wb_fetch")
 
             if st.button("Fetch Wellbores", key="btn_wellbores"):
                 with st.spinner("Fetching wellbores..."):
                     data, err = client.get_wellbores(
                         well=well_filter if well_filter else None,
-                        page=wb_page, page_size=wb_size,
+                        limit=wb_limit,
+                        fetch=wb_fetch if wb_fetch else None,
                     )
                 if err:
                     st.error(err)
                 elif data:
-                    df, _ = PetroVaultClient._to_dataframe(data)
+                    flat = PetroVaultClient._flatten_resource_items(data)
+                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
                     if df is not None and not df.empty:
                         st.dataframe(df, use_container_width=True)
                         st.session_state["wellbores_df"] = df
@@ -235,18 +243,18 @@ elif page == "Well Model":
             st.subheader("Logs")
             col1, col2, col3 = st.columns(3)
             with col1:
-                log_well = st.text_input("Well (ID or name)", key="log_well",
+                log_well = st.text_input("Well UID", key="log_well",
                                           help="Leave empty to get all logs")
             with col2:
-                log_wellbore = st.text_input("Wellbore (ID or name)", key="log_wellbore")
+                log_wellbore = st.text_input("Wellbore UID", key="log_wellbore")
             with col3:
-                log_name = st.text_input("Log (ID or name)", key="log_name")
+                log_name = st.text_input("Log UID", key="log_name")
 
             col1, col2 = st.columns(2)
             with col1:
-                log_page = st.number_input("Page", min_value=1, value=1, key="log_page")
+                log_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="log_limit")
             with col2:
-                log_size = st.number_input("Page Size", min_value=10, max_value=500, value=50, key="log_size")
+                log_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="log_fetch")
 
             if st.button("Fetch Logs", key="btn_logs"):
                 with st.spinner("Fetching logs..."):
@@ -254,12 +262,14 @@ elif page == "Well Model":
                         well=log_well if log_well else None,
                         wellbore=log_wellbore if log_wellbore else None,
                         log=log_name if log_name else None,
-                        page=log_page, page_size=log_size,
+                        limit=log_limit,
+                        fetch=log_fetch if log_fetch else None,
                     )
                 if err:
                     st.error(err)
                 elif data:
-                    df, _ = PetroVaultClient._to_dataframe(data)
+                    flat = PetroVaultClient._flatten_resource_items(data)
+                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
                     if df is not None and not df.empty:
                         st.dataframe(df, use_container_width=True)
                         st.session_state["logs_df"] = df
@@ -283,13 +293,19 @@ elif page == "Channel Data":
 
         # --- Channel Data Tab ---
         with tab_data:
-            st.subheader("Channel Data (Raw)")
+            st.subheader("Channel Data (Raw DataFrame)")
+            st.markdown("""
+            Uses `/v1/channels/data/range` or `/v1/channels/data/latest`.
+            The **Target** must be a WITSML URI for a log, trajectory, or mud log resource.
+            """)
 
-            log_id = st.text_input("Log ID", help="The ID of the log object to fetch data from", key="cd_log_id")
+            target = st.text_input("Target URI", key="cd_target",
+                                    help="WITSML URI for a log object, e.g. //well(uid)/wellbore(uid)/log(uid)",
+                                    placeholder="//well_uid/wellbore_uid/log_uid")
             mode = st.radio("Mode", ["Latest", "Range"], horizontal=True, key="cd_mode")
 
-            channels_input = st.text_input("Channels (comma-separated)", key="cd_channels",
-                                            help="Leave empty for all channels, or specify e.g. DEPTH,ROP,WOB")
+            fields_input = st.text_input("Fields / Mnemonics (comma-separated)", key="cd_fields",
+                                          help="Leave empty for all channels, or specify e.g. DEPTH,ROP,WOB")
 
             col1, col2, col3 = st.columns(3)
             if mode == "Range":
@@ -302,20 +318,20 @@ elif page == "Channel Data":
                 start_val = None
                 end_val = None
             with col3 if mode == "Range" else col1:
-                max_rows = st.number_input("Max Rows", min_value=1, max_value=100000, value=1000, key="cd_maxrows")
+                max_rows = st.number_input("Limit", min_value=1, max_value=100000, value=1000, key="cd_limit")
 
             if st.button("Fetch Channel Data", key="btn_cd"):
-                if not log_id:
-                    st.error("Enter a Log ID.")
+                if not target:
+                    st.error("Enter a Target URI.")
                 else:
-                    channels = channels_input.strip() if channels_input.strip() else None
+                    fields = fields_input.strip() if fields_input.strip() else None
                     with st.spinner("Fetching channel data..."):
                         df, err = client.channel_data_as_df(
-                            log_id=log_id,
+                            target=target,
                             start=start_val if start_val else None,
                             end=end_val if end_val else None,
-                            channels=channels,
-                            max_rows=max_rows,
+                            fields=fields,
+                            limit=max_rows,
                             mode="latest" if mode == "Latest" else "range",
                         )
                     if err:
@@ -341,7 +357,7 @@ elif page == "Channel Data":
                         # Store
                         st.subheader("Store to Database")
                         ds_name = st.text_input("Dataset name",
-                                                 value=f"channel_{log_id}_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                                                 value=f"channel_{datetime.now().strftime('%Y%m%d_%H%M')}",
                                                  key="cd_dsname")
                         if st.button("Store", key="cd_store"):
                             table = store_excel_data(ds_name, df, "Channel Data")
@@ -349,19 +365,24 @@ elif page == "Channel Data":
 
                         # CSV download
                         csv = df.to_csv(index=False)
-                        st.download_button("Download CSV", csv, f"channel_data_{log_id}.csv", "text/csv", key="cd_dl")
+                        st.download_button("Download CSV", csv, "channel_data.csv", "text/csv", key="cd_dl")
                     else:
                         st.info("No data returned.")
 
         # --- Channel Report Tab ---
         with tab_report:
             st.subheader("Channel Report")
-            st.markdown("Report format returns data with channel names as columns.")
+            st.markdown("""
+            Uses `/v1/channels/report/range` or `/v1/channels/report/latest`.
+            The **Channels** field takes comma-separated WITSML 1.4 log/channel URIs.
+            """)
 
-            rpt_log_id = st.text_input("Log ID", key="rpt_log_id")
+            rpt_channels = st.text_input("Channel URIs (comma-separated, required)", key="rpt_channels",
+                                          help="WITSML 1.4 log and channel URIs. All must share the same index type.")
+            rpt_aliases = st.text_input("Aliases (comma-separated, optional)", key="rpt_aliases",
+                                         help='Use "-" for no alias on a given channel')
+            rpt_metadata = st.checkbox("Include metadata", key="rpt_metadata")
             rpt_mode = st.radio("Mode", ["Latest", "Range"], horizontal=True, key="rpt_mode")
-
-            rpt_channels = st.text_input("Channels (comma-separated)", key="rpt_channels")
 
             col1, col2, col3 = st.columns(3)
             if rpt_mode == "Range":
@@ -369,24 +390,30 @@ elif page == "Channel Data":
                     rpt_start = st.text_input("Start", key="rpt_start")
                 with col2:
                     rpt_end = st.text_input("End", key="rpt_end")
+                with col3:
+                    rpt_limit = st.number_input("Limit", min_value=1, max_value=100000, value=1000, key="rpt_limit")
+                rpt_count = None
             else:
                 rpt_start = None
                 rpt_end = None
-            with col3 if rpt_mode == "Range" else col1:
-                rpt_max = st.number_input("Max Rows", min_value=1, max_value=100000, value=1000, key="rpt_max")
+                rpt_limit = None
+                with col1:
+                    rpt_count = st.number_input("Count (latest points per channel)", min_value=1,
+                                                 max_value=100000, value=100, key="rpt_count")
 
             if st.button("Fetch Report", key="btn_rpt"):
-                if not rpt_log_id:
-                    st.error("Enter a Log ID.")
+                if not rpt_channels:
+                    st.error("Enter at least one Channel URI.")
                 else:
-                    channels = rpt_channels.strip() if rpt_channels.strip() else None
                     with st.spinner("Fetching report..."):
                         df, err = client.channel_report_as_df(
-                            log_id=rpt_log_id,
+                            channels=rpt_channels.strip(),
+                            aliases=rpt_aliases.strip() if rpt_aliases.strip() else None,
+                            metadata="true" if rpt_metadata else None,
                             start=rpt_start if rpt_start else None,
                             end=rpt_end if rpt_end else None,
-                            channels=channels,
-                            max_rows=rpt_max,
+                            limit=rpt_limit,
+                            count=rpt_count,
                             mode="latest" if rpt_mode == "Latest" else "range",
                         )
                     if err:
@@ -396,7 +423,7 @@ elif page == "Channel Data":
                         st.dataframe(df, use_container_width=True)
 
                         csv = df.to_csv(index=False)
-                        st.download_button("Download CSV", csv, f"report_{rpt_log_id}.csv", "text/csv", key="rpt_dl")
+                        st.download_button("Download CSV", csv, "report.csv", "text/csv", key="rpt_dl")
                     else:
                         st.info("No report data returned.")
 
@@ -413,40 +440,64 @@ elif page == "Resources":
 
         with tab_browse:
             st.subheader("Search Resources")
+            st.markdown("Only one of URI, Parent URI, or Parent ID may be specified.")
+
             col1, col2 = st.columns(2)
             with col1:
-                res_name = st.text_input("Name filter", key="res_name")
+                res_uri = st.text_input("Resource URI", key="res_uri",
+                                         help="If specified, returns the single matching resource")
+                res_parent_uri = st.text_input("Parent URI", key="res_parent_uri",
+                                                help="All results will be descendants of this parent")
+                res_parent_id = st.text_input("Parent ID (UUID)", key="res_parent_id")
             with col2:
-                res_type = st.selectbox("Resource type", ["", "Well", "Wellbore", "Log", "MudLog", "Trajectory", "BhaRun", "Tubular"], key="res_type")
-
-            params = {}
-            if res_name:
-                params["name"] = res_name
-            if res_type:
-                params["type"] = res_type
+                res_type = st.selectbox("Resource type",
+                                         ["", "well", "wellbore", "log", "mudLog", "trajectory", "bhaRun", "tubular"],
+                                         key="res_type")
+                res_fetch = st.text_input("Fetch parts", placeholder="properties,parents,model,data", key="res_fetch")
+                res_depth = st.number_input("Search depth", min_value=0, max_value=10, value=1, key="res_depth")
+                res_limit = st.number_input("Limit", min_value=1, max_value=1000, value=20, key="res_limit")
 
             if st.button("Search", key="btn_res"):
                 with st.spinner("Searching resources..."):
-                    data, err = client.get_resources(params or None)
+                    data, err = client.get_resources(
+                        uri=res_uri if res_uri else None,
+                        parent_uri=res_parent_uri if res_parent_uri else None,
+                        parent_id=res_parent_id if res_parent_id else None,
+                        resource_type=res_type if res_type else None,
+                        fetch=res_fetch if res_fetch else None,
+                        depth=res_depth if res_depth > 0 else None,
+                        limit=res_limit,
+                    )
                 if err:
                     st.error(err)
                 elif data:
-                    df, _ = PetroVaultClient._to_dataframe(data)
+                    with st.expander("Raw Response", expanded=False):
+                        st.json(data)
+                    flat = PetroVaultClient._flatten_resource_items(data)
+                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
                     if df is not None and not df.empty:
                         st.success(f"Found {len(df)} resources")
                         st.dataframe(df, use_container_width=True)
+                        paging = PetroVaultClient._extract_paging(data)
+                        if paging.get("hasMore"):
+                            st.info(f"More results available. Cursor: `{paging.get('cursor')}`")
                     else:
                         st.info("No resources found.")
 
         with tab_detail:
             st.subheader("Resource Detail")
-            resource_id = st.text_input("Resource ID", key="res_detail_id")
+            resource_id = st.text_input("Resource ID (UUID)", key="res_detail_id")
+            detail_fetch = st.text_input("Fetch parts", placeholder="properties,parents,model,data",
+                                          key="res_detail_fetch")
             if st.button("Fetch", key="btn_res_detail"):
                 if not resource_id:
                     st.error("Enter a Resource ID.")
                 else:
                     with st.spinner("Fetching resource..."):
-                        data, err = client.get_resource_by_id(resource_id)
+                        data, err = client.get_resource_by_id(
+                            resource_id,
+                            fetch=detail_fetch if detail_fetch else None,
+                        )
                     if err:
                         st.error(err)
                     elif data:
@@ -465,7 +516,7 @@ elif page == "API Custom Query":
 
         endpoint = st.text_input(
             "Endpoint",
-            placeholder="e.g. v1/wellmodel/wells or v1/channels/data/latest",
+            placeholder="e.g. v1/wellmodel/wells or v1/channels/report/range",
             help="The API endpoint path (without base URL)",
         )
 
@@ -474,10 +525,10 @@ elif page == "API Custom Query":
         col1, col2 = st.columns(2)
         with col1:
             param_keys = st.text_area("Query Parameter Keys (one per line)",
-                                       placeholder="logId\nchannels\nmaxRows")
+                                       placeholder="target\nfields\nlimit")
         with col2:
             param_vals = st.text_area("Query Parameter Values (one per line)",
-                                       placeholder="my-log-id\nDEPTH,ROP\n1000")
+                                       placeholder="//well/wellbore/log\nDEPTH,ROP\n1000")
 
         post_body = None
         if method == "POST":
