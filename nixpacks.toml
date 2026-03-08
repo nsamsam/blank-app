@@ -1,8 +1,5 @@
 [phases.setup]
-nixPkgs = ["python311Full", "python311Packages.pip", "postgresql_15"]
-
-[phases.install]
-cmds = ["python -m pip install -r requirements.txt"]
+aptPkgs = ["libpq-dev"]
 
 [start]
 cmd = "streamlit run streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true"
