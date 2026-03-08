@@ -1,3 +1,4 @@
+import base64
 import requests
 import pandas as pd
 from datetime import datetime
@@ -23,8 +24,12 @@ class PetroVaultClient:
             self.session.headers["Authorization"] = f"Bearer {self.auth_token}"
         elif self.auth_type == "api_key" and self.api_key:
             self.session.headers["X-API-Key"] = self.api_key
-        elif self.auth_type == "basic" and self.auth_token:
-            self.session.headers["Authorization"] = f"Basic {self.auth_token}"
+        elif self.auth_type == "basic":
+            # api_key field = username, auth_token field = password
+            username = self.api_key or ""
+            password = self.auth_token or ""
+            credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+            self.session.headers["Authorization"] = f"Basic {credentials}"
 
     def test_connection(self):
         """Test if the API is reachable using the health endpoint."""

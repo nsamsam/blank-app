@@ -116,9 +116,15 @@ elif page == "API Connections":
                 value="https://pv1.petrolink.net/petrovault/publicapi",
                 help="The root URL of the PetroVault Public API",
             )
-            auth_type = st.selectbox("Auth Type", ["api_key", "bearer", "basic", "none"])
-            api_key = st.text_input("API Key", type="password", help="Your PetroVault API key")
-            auth_token = st.text_input("Auth Token / Password", type="password")
+            auth_type = st.selectbox("Auth Type", ["basic", "api_key", "bearer", "none"])
+            api_key = st.text_input(
+                "API Key / Username", type="password",
+                help="API key (for api_key auth) or Username (for basic auth)",
+            )
+            auth_token = st.text_input(
+                "Auth Token / Password", type="password",
+                help="Bearer token (for bearer auth) or Password (for basic auth)",
+            )
             submitted = st.form_submit_button("Save Connection")
             if submitted and name and base_url:
                 config_id = save_api_config(name, base_url, api_key, auth_token, auth_type)
