@@ -126,10 +126,18 @@ elif page == "API Connections":
                 help="Bearer token (for bearer auth) or Password (for basic auth)",
             )
             submitted = st.form_submit_button("Save Connection")
-            if submitted and name and base_url:
-                config_id = save_api_config(name, base_url, api_key, auth_token, auth_type)
-                st.success(f"Connection '{name}' saved (ID: {config_id})")
-                st.rerun()
+            if submitted:
+                if not name:
+                    st.error("Please enter a Connection Name.")
+                elif not base_url:
+                    st.error("Please enter a Base URL.")
+                else:
+                    try:
+                        config_id = save_api_config(name, base_url, api_key, auth_token, auth_type)
+                        st.success(f"Connection '{name}' saved (ID: {config_id})")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to save connection: {e}")
 
     st.subheader("Saved Connections")
     configs = get_api_configs()
