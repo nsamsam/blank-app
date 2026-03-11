@@ -182,33 +182,45 @@ elif page == "API Connections":
             row = configs[configs["name"] == selected].iloc[0]
             client = create_client(row)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("**Health Check**")
-                health, err = client.get_health()
+            # Test multiple endpoint categories to find what the account can access
+            endpoints_to_test = [
+                ("Info / Health", "v1/info/health"),
+                ("Info / Version", "v1/info/version"),
+                ("Well Model / Wells", "v1/wellmodel/wells"),
+                ("Well Model / Wellbores", "v1/wellmodel/wellbores"),
+                ("Well Model / Logs", "v1/wellmodel/logs"),
+                ("Resources", "v1/resources"),
+                ("Channel Data / Latest", "v1/channels/data/latest"),
+                ("Channel Report / Latest", "v1/channels/report/latest"),
+            ]
+
+            any_success = False
+            st.write("**Endpoint Access Diagnostics**")
+            for label, endpoint in endpoints_to_test:
+                data, err = client._get(endpoint, params={"limit": "1"})
                 if err and "403" in str(err):
-                    # Fallback: try fetching wells to verify connectivity
-                    wells, wells_err = client.get_wells(limit=1)
-                    if wells_err:
-                        st.error(f"Health endpoint requires elevated role. Fallback also failed: {wells_err}")
-                    else:
-                        st.success("Connected (health endpoint restricted, but API is reachable)")
-                        st.info("Your account lacks the role for `/v1/info/health`. Data endpoints work fine.")
+                    st.warning(f"**{label}** (`{endpoint}`): 403 — No permission")
+                elif err and "401" in str(err):
+                    st.error(f"**{label}** (`{endpoint}`): 401 — Authentication failed")
                 elif err:
-                    st.error(err)
+                    st.info(f"**{label}** (`{endpoint}`): {err}")
                 else:
-                    st.success("Healthy")
-                    st.json(health)
-            with col2:
-                st.write("**API Version**")
-                version, err = client.get_version()
-                if err and "403" in str(err):
-                    st.warning("Version endpoint requires elevated role — skipped.")
-                elif err:
-                    st.error(err)
-                else:
-                    st.success("Connected")
-                    st.json(version)
+                    st.success(f"**{label}** (`{endpoint}`): OK")
+                    any_success = True
+
+            st.divider()
+            if any_success:
+                st.success("Connection is working. Some endpoints are accessible.")
+            else:
+                st.error(
+                    "All endpoints returned 403. Your account is authenticated but "
+                    "lacks API roles. Please ask your PetroVault administrator to "
+                    "assign the required roles to your account."
+                )
+                st.info(
+                    "**Tip:** You can still use **Demo Mode** (toggle in the sidebar) "
+                    "to explore the app with sample data while waiting for role assignment."
+                )
 
 # ============================================================
 # WELL MODEL
