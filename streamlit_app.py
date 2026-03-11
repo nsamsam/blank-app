@@ -94,7 +94,14 @@ if page == "Dashboard":
         for _, row in configs.iterrows():
             client = create_client(row)
             health_data, err = client.get_health()
-            if err:
+            if err and "403" in str(err):
+                # Health endpoint requires a role; fall back to wells
+                wells_data, wells_err = client.get_wells(limit=1)
+                if wells_err:
+                    st.error(f"**{row['name']}**: Health endpoint restricted & fallback failed: {wells_err}")
+                else:
+                    st.success(f"**{row['name']}**: Connected (health endpoint restricted, data endpoints OK)")
+            elif err:
                 st.error(f"**{row['name']}**: {err}")
             else:
                 st.success(f"**{row['name']}**: Healthy")
@@ -179,7 +186,15 @@ elif page == "API Connections":
             with col1:
                 st.write("**Health Check**")
                 health, err = client.get_health()
-                if err:
+                if err and "403" in str(err):
+                    # Fallback: try fetching wells to verify connectivity
+                    wells, wells_err = client.get_wells(limit=1)
+                    if wells_err:
+                        st.error(f"Health endpoint requires elevated role. Fallback also failed: {wells_err}")
+                    else:
+                        st.success("Connected (health endpoint restricted, but API is reachable)")
+                        st.info("Your account lacks the role for `/v1/info/health`. Data endpoints work fine.")
+                elif err:
                     st.error(err)
                 else:
                     st.success("Healthy")
@@ -187,7 +202,9 @@ elif page == "API Connections":
             with col2:
                 st.write("**API Version**")
                 version, err = client.get_version()
-                if err:
+                if err and "403" in str(err):
+                    st.warning("Version endpoint requires elevated role — skipped.")
+                elif err:
                     st.error(err)
                 else:
                     st.success("Connected")

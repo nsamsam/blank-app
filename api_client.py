@@ -32,9 +32,25 @@ class PetroVaultClient:
             self.session.headers["Authorization"] = f"Basic {credentials}"
 
     def test_connection(self):
-        """Test if the API is reachable using the health endpoint."""
+        """Test if the API is reachable.
+
+        Tries /v1/info/health first. If that returns 403 (role not granted),
+        falls back to /v1/wellmodel/wells?limit=1 which typically requires
+        fewer permissions.
+        """
         try:
             resp = self.session.get(f"{self.base_url}/v1/info/health", timeout=10)
+            if resp.status_code == 403:
+                # Health endpoint requires a role the user may not have.
+                # Fall back to a data endpoint to verify connectivity.
+                resp2 = self.session.get(
+                    f"{self.base_url}/v1/wellmodel/wells",
+                    params={"limit": 1},
+                    timeout=10,
+                )
+                if resp2.status_code == 403:
+                    return resp2.status_code, resp2.text[:500]
+                return resp2.status_code, resp2.text[:500]
             return resp.status_code, resp.text[:500]
         except requests.exceptions.ConnectionError as e:
             return None, f"Connection error: {e}"
