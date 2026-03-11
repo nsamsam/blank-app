@@ -8,6 +8,11 @@ from database import (
     get_realtime_data, store_realtime_data, run_custom_query, get_all_tables,
 )
 from api_client import PetroVaultClient, create_client
+from demo_data import (
+    DEMO_WELLS, DEMO_WELLBORES, DEMO_LOGS,
+    generate_demo_channel_data, generate_demo_channel_report,
+    DEMO_RESOURCES, DEMO_RESOURCE_DETAIL, DEMO_HEALTH, DEMO_VERSION,
+)
 
 st.set_page_config(page_title="Engineering Data Workbook", layout="wide")
 
@@ -57,6 +62,11 @@ page = st.sidebar.radio(
     ],
 )
 
+st.sidebar.divider()
+demo_mode = st.sidebar.toggle("Demo Mode", value=False, help="Use sample data instead of live API (useful when API credentials lack permissions)")
+if demo_mode:
+    st.sidebar.info("Using sample data — no API calls will be made.")
+
 # ============================================================
 # DASHBOARD
 # ============================================================
@@ -74,7 +84,12 @@ if page == "Dashboard":
     col3.metric("Database Tables", len(tables))
 
     # Quick API health check
-    if not configs.empty:
+    if demo_mode:
+        st.subheader("API Status")
+        st.success("**Demo Connection**: Healthy")
+        with st.expander("Health Details"):
+            st.json(DEMO_HEALTH)
+    elif not configs.empty:
         st.subheader("API Status")
         for _, row in configs.iterrows():
             client = create_client(row)
@@ -185,114 +200,156 @@ elif page == "Well Model":
     st.title("Well Model Explorer")
     st.markdown("Browse wells, wellbores, and logs from PetroVault.")
 
-    client, config_row = _get_client()
-    if client:
+    if demo_mode:
         tab_wells, tab_wellbores, tab_logs = st.tabs(["Wells", "Wellbores", "Logs"])
 
-        # --- Wells Tab ---
         with tab_wells:
             st.subheader("Wells")
-            col1, col2 = st.columns(2)
-            with col1:
-                wells_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wells_limit")
-            with col2:
-                wells_fetch = st.text_input("Fetch parts", placeholder="properties,parents,model",
-                                             help="Comma-separated: properties, parents, model, data", key="wells_fetch")
-
             if st.button("Fetch Wells", key="btn_wells"):
-                with st.spinner("Fetching wells..."):
-                    data, err = client.get_wells(
-                        limit=wells_limit,
-                        fetch=wells_fetch if wells_fetch else None,
-                    )
-                if err:
-                    st.error(err)
-                elif data:
-                    paging = PetroVaultClient._extract_paging(data)
-                    flat = PetroVaultClient._flatten_resource_items(data)
-                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
-                    if df is not None and not df.empty:
-                        st.dataframe(df, use_container_width=True)
-                        st.session_state["wells_df"] = df
-                        if paging.get("hasMore"):
-                            st.info(f"Page {paging.get('pageNumber')} — more results available (cursor: `{paging.get('cursor')}`)")
+                data = DEMO_WELLS
+                flat = PetroVaultClient._flatten_resource_items(data)
+                df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                if df is not None and not df.empty:
+                    st.success(f"Demo: {len(df)} wells loaded")
+                    st.dataframe(df, use_container_width=True)
+                    st.session_state["wells_df"] = df
+                    if st.button("Store Wells to DB", key="store_wells"):
+                        table = store_excel_data(f"wells_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
+                        st.success(f"Stored as `{table}`")
 
-                        if st.button("Store Wells to DB", key="store_wells"):
-                            table = store_excel_data(f"wells_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
-                            st.success(f"Stored as `{table}`")
-                    else:
-                        st.info("No wells returned.")
-
-        # --- Wellbores Tab ---
         with tab_wellbores:
             st.subheader("Wellbores")
-            well_filter = st.text_input("Filter by Well UID", key="wb_well_filter",
-                                         help="Leave empty to get all wellbores")
-            col1, col2 = st.columns(2)
-            with col1:
-                wb_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wb_limit")
-            with col2:
-                wb_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="wb_fetch")
-
             if st.button("Fetch Wellbores", key="btn_wellbores"):
-                with st.spinner("Fetching wellbores..."):
-                    data, err = client.get_wellbores(
-                        well=well_filter if well_filter else None,
-                        limit=wb_limit,
-                        fetch=wb_fetch if wb_fetch else None,
-                    )
-                if err:
-                    st.error(err)
-                elif data:
-                    flat = PetroVaultClient._flatten_resource_items(data)
-                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
-                    if df is not None and not df.empty:
-                        st.dataframe(df, use_container_width=True)
-                        st.session_state["wellbores_df"] = df
-                    else:
-                        st.info("No wellbores returned.")
+                data = DEMO_WELLBORES
+                flat = PetroVaultClient._flatten_resource_items(data)
+                df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                if df is not None and not df.empty:
+                    st.success(f"Demo: {len(df)} wellbores loaded")
+                    st.dataframe(df, use_container_width=True)
+                    st.session_state["wellbores_df"] = df
 
-        # --- Logs Tab ---
         with tab_logs:
             st.subheader("Logs")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                log_well = st.text_input("Well UID", key="log_well",
-                                          help="Leave empty to get all logs")
-            with col2:
-                log_wellbore = st.text_input("Wellbore UID", key="log_wellbore")
-            with col3:
-                log_name = st.text_input("Log UID", key="log_name")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                log_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="log_limit")
-            with col2:
-                log_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="log_fetch")
-
             if st.button("Fetch Logs", key="btn_logs"):
-                with st.spinner("Fetching logs..."):
-                    data, err = client.get_logs(
-                        well=log_well if log_well else None,
-                        wellbore=log_wellbore if log_wellbore else None,
-                        log=log_name if log_name else None,
-                        limit=log_limit,
-                        fetch=log_fetch if log_fetch else None,
-                    )
-                if err:
-                    st.error(err)
-                elif data:
-                    flat = PetroVaultClient._flatten_resource_items(data)
-                    df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
-                    if df is not None and not df.empty:
-                        st.dataframe(df, use_container_width=True)
-                        st.session_state["logs_df"] = df
+                data = DEMO_LOGS
+                flat = PetroVaultClient._flatten_resource_items(data)
+                df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                if df is not None and not df.empty:
+                    st.success(f"Demo: {len(df)} logs loaded")
+                    st.dataframe(df, use_container_width=True)
+                    st.session_state["logs_df"] = df
+                    if st.button("Store Logs to DB", key="store_logs"):
+                        table = store_excel_data(f"logs_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
+                        st.success(f"Stored as `{table}`")
+    else:
+        client, config_row = _get_client()
+        if client:
+            tab_wells, tab_wellbores, tab_logs = st.tabs(["Wells", "Wellbores", "Logs"])
 
-                        if st.button("Store Logs to DB", key="store_logs"):
-                            table = store_excel_data(f"logs_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
-                            st.success(f"Stored as `{table}`")
-                    else:
-                        st.info("No logs returned.")
+            # --- Wells Tab ---
+            with tab_wells:
+                st.subheader("Wells")
+                col1, col2 = st.columns(2)
+                with col1:
+                    wells_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wells_limit")
+                with col2:
+                    wells_fetch = st.text_input("Fetch parts", placeholder="properties,parents,model",
+                                                 help="Comma-separated: properties, parents, model, data", key="wells_fetch")
+
+                if st.button("Fetch Wells", key="btn_wells_live"):
+                    with st.spinner("Fetching wells..."):
+                        data, err = client.get_wells(
+                            limit=wells_limit,
+                            fetch=wells_fetch if wells_fetch else None,
+                        )
+                    if err:
+                        st.error(err)
+                    elif data:
+                        paging = PetroVaultClient._extract_paging(data)
+                        flat = PetroVaultClient._flatten_resource_items(data)
+                        df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                        if df is not None and not df.empty:
+                            st.dataframe(df, use_container_width=True)
+                            st.session_state["wells_df"] = df
+                            if paging.get("hasMore"):
+                                st.info(f"Page {paging.get('pageNumber')} — more results available (cursor: `{paging.get('cursor')}`)")
+
+                            if st.button("Store Wells to DB", key="store_wells_live"):
+                                table = store_excel_data(f"wells_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
+                                st.success(f"Stored as `{table}`")
+                        else:
+                            st.info("No wells returned.")
+
+            # --- Wellbores Tab ---
+            with tab_wellbores:
+                st.subheader("Wellbores")
+                well_filter = st.text_input("Filter by Well UID", key="wb_well_filter",
+                                             help="Leave empty to get all wellbores")
+                col1, col2 = st.columns(2)
+                with col1:
+                    wb_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="wb_limit")
+                with col2:
+                    wb_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="wb_fetch")
+
+                if st.button("Fetch Wellbores", key="btn_wellbores_live"):
+                    with st.spinner("Fetching wellbores..."):
+                        data, err = client.get_wellbores(
+                            well=well_filter if well_filter else None,
+                            limit=wb_limit,
+                            fetch=wb_fetch if wb_fetch else None,
+                        )
+                    if err:
+                        st.error(err)
+                    elif data:
+                        flat = PetroVaultClient._flatten_resource_items(data)
+                        df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                        if df is not None and not df.empty:
+                            st.dataframe(df, use_container_width=True)
+                            st.session_state["wellbores_df"] = df
+                        else:
+                            st.info("No wellbores returned.")
+
+            # --- Logs Tab ---
+            with tab_logs:
+                st.subheader("Logs")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    log_well = st.text_input("Well UID", key="log_well",
+                                              help="Leave empty to get all logs")
+                with col2:
+                    log_wellbore = st.text_input("Wellbore UID", key="log_wellbore")
+                with col3:
+                    log_name = st.text_input("Log UID", key="log_name")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    log_limit = st.number_input("Limit", min_value=1, max_value=1000, value=50, key="log_limit")
+                with col2:
+                    log_fetch = st.text_input("Fetch parts", placeholder="properties,model", key="log_fetch")
+
+                if st.button("Fetch Logs", key="btn_logs_live"):
+                    with st.spinner("Fetching logs..."):
+                        data, err = client.get_logs(
+                            well=log_well if log_well else None,
+                            wellbore=log_wellbore if log_wellbore else None,
+                            log=log_name if log_name else None,
+                            limit=log_limit,
+                            fetch=log_fetch if log_fetch else None,
+                        )
+                    if err:
+                        st.error(err)
+                    elif data:
+                        flat = PetroVaultClient._flatten_resource_items(data)
+                        df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                        if df is not None and not df.empty:
+                            st.dataframe(df, use_container_width=True)
+                            st.session_state["logs_df"] = df
+
+                            if st.button("Store Logs to DB", key="store_logs_live"):
+                                table = store_excel_data(f"logs_{datetime.now().strftime('%Y%m%d_%H%M')}", df, "API")
+                                st.success(f"Stored as `{table}`")
+                        else:
+                            st.info("No logs returned.")
 
 # ============================================================
 # CHANNEL DATA
@@ -301,8 +358,49 @@ elif page == "Channel Data":
     st.title("Channel Data")
     st.markdown("Fetch channel data from PetroVault logs — latest values or a date/depth range.")
 
-    client, config_row = _get_client()
-    if client:
+    if demo_mode:
+        tab_data, tab_report = st.tabs(["Channel Data", "Channel Report"])
+
+        with tab_data:
+            st.subheader("Channel Data (Demo)")
+            mode = st.radio("Mode", ["Latest", "Range"], horizontal=True, key="cd_mode_demo")
+            if st.button("Fetch Channel Data", key="btn_cd_demo"):
+                demo_raw = generate_demo_channel_data(500 if mode == "Range" else 10, mode=mode.lower())
+                df, _ = PetroVaultClient._to_dataframe(demo_raw)
+                if df is not None and not df.empty:
+                    st.success(f"Demo: {len(df)} rows x {len(df.columns)} columns")
+                    st.dataframe(df, use_container_width=True)
+
+                    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+                    if len(numeric_cols) >= 2:
+                        st.subheader("Quick Chart")
+                        all_cols = df.columns.tolist()
+                        cx = st.selectbox("X-Axis", all_cols, key="cd_cx_demo")
+                        cy = st.multiselect("Y-Axis", numeric_cols, default=numeric_cols[:3], key="cd_cy_demo")
+                        if cy:
+                            fig = go.Figure()
+                            for col in cy:
+                                fig.add_trace(go.Scatter(x=df[cx], y=df[col], mode="lines", name=col))
+                            fig.update_layout(template="plotly_white", height=500)
+                            st.plotly_chart(fig, use_container_width=True)
+
+                    csv = df.to_csv(index=False)
+                    st.download_button("Download CSV", csv, "demo_channel_data.csv", "text/csv", key="cd_dl_demo")
+
+        with tab_report:
+            st.subheader("Channel Report (Demo)")
+            if st.button("Fetch Report", key="btn_rpt_demo"):
+                rows = generate_demo_channel_report(50)
+                df = pd.DataFrame(rows)
+                st.success(f"Demo Report: {len(df)} rows")
+                st.dataframe(df, use_container_width=True)
+                csv = df.to_csv(index=False)
+                st.download_button("Download CSV", csv, "demo_report.csv", "text/csv", key="rpt_dl_demo")
+
+    else:
+        client, config_row = _get_client()
+        if not client:
+            st.stop()
         tab_data, tab_report = st.tabs(["Channel Data", "Channel Report"])
 
         # --- Channel Data Tab ---
@@ -448,8 +546,30 @@ elif page == "Resources":
     st.title("Resources Explorer")
     st.markdown("Browse and search PetroVault resources.")
 
-    client, config_row = _get_client()
-    if client:
+    if demo_mode:
+        tab_browse, tab_detail = st.tabs(["Browse Resources", "Resource Detail"])
+
+        with tab_browse:
+            st.subheader("Search Resources (Demo)")
+            if st.button("Search", key="btn_res_demo"):
+                data = DEMO_RESOURCES
+                with st.expander("Raw Response", expanded=False):
+                    st.json(data)
+                flat = PetroVaultClient._flatten_resource_items(data)
+                df, _ = PetroVaultClient._to_dataframe(flat if isinstance(flat, list) else data)
+                if df is not None and not df.empty:
+                    st.success(f"Demo: Found {len(df)} resources")
+                    st.dataframe(df, use_container_width=True)
+
+        with tab_detail:
+            st.subheader("Resource Detail (Demo)")
+            if st.button("Fetch", key="btn_res_detail_demo"):
+                st.json(DEMO_RESOURCE_DETAIL)
+
+    else:
+        client, config_row = _get_client()
+        if not client:
+            st.stop()
         tab_browse, tab_detail = st.tabs(["Browse Resources", "Resource Detail"])
 
         with tab_browse:
@@ -523,6 +643,10 @@ elif page == "Resources":
 elif page == "API Custom Query":
     st.title("Custom API Query")
     st.markdown("Call any PetroVault endpoint directly.")
+
+    if demo_mode:
+        st.warning("Custom API queries are not available in Demo Mode. Switch to a live connection to use this feature.")
+        st.stop()
 
     client, config_row = _get_client()
     if client:
