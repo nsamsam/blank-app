@@ -1146,10 +1146,24 @@ elif page == "WellView (Snowflake)":
 
     # --- Custom SQL ---
     st.subheader("Snowflake SQL Query")
+
+    # Auto-generate SQL based on selected table/view
+    if chosen_obj and chosen_obj != "(none)":
+        _, sql_table = chosen_obj.split(": ", 1)
+        sql_col_df, _ = get_columns(sql_table, chosen_schema, sf_config)
+        if sql_col_df is not None and not sql_col_df.empty:
+            col_names = sql_col_df["name"].tolist()
+            cols_sql = ",\n    ".join(f'"{c}"' for c in col_names)
+            auto_sql = f'SELECT\n    {cols_sql}\nFROM "{chosen_schema}"."{sql_table}"\nLIMIT 100;'
+        else:
+            auto_sql = f'SELECT *\nFROM "{chosen_schema}"."{sql_table}"\nLIMIT 100;'
+    else:
+        auto_sql = "SELECT 1;"
+
     sf_query = st.text_area(
         "SQL",
-        value=f'SELECT * FROM "{chosen_schema}"."<table>" LIMIT 100;' if chosen_obj and chosen_obj != "(none)" else "SELECT 1;",
-        height=120,
+        value=auto_sql,
+        height=180,
         key="sf_sql",
     )
     if st.button("Run Snowflake Query", key="sf_run_query"):
