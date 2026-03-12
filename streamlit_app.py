@@ -165,11 +165,17 @@ class TradierAPI:
 with st.sidebar:
     st.header("⚙️ Configuration")
 
-    api_key = st.text_input(
-        "Tradier API Key",
-        type="password",
-        help="Enter your Tradier API token",
-    )
+    # Load API key from Streamlit Secrets, with optional manual override
+    default_key = st.secrets.get("TRADIER_API_KEY", "")
+    if default_key:
+        api_key = default_key
+        st.success("API key loaded from secrets")
+    else:
+        api_key = st.text_input(
+            "Tradier API Key",
+            type="password",
+            help="Enter your Tradier API token",
+        )
     use_sandbox = st.toggle("Use Sandbox (Paper Trading)", value=False)
 
     st.divider()
