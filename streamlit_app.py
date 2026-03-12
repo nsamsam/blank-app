@@ -13,6 +13,10 @@ from demo_data import (
     generate_demo_channel_data, generate_demo_channel_report,
     DEMO_RESOURCES, DEMO_RESOURCE_DETAIL, DEMO_HEALTH, DEMO_VERSION,
 )
+from snowflake_client import (
+    SNOWFLAKE_AVAILABLE, test_snowflake_connection, get_schemas,
+    get_tables, get_views, get_columns, run_query, preview_table, DEFAULT_CONFIG,
+)
 
 st.set_page_config(page_title="Engineering Data Workbook", layout="wide")
 
@@ -59,6 +63,7 @@ page = st.sidebar.radio(
         "Excel Upload",
         "Data Overlay",
         "SQL Workbook",
+        "WellView (Snowflake)",
     ],
 )
 
@@ -926,3 +931,107 @@ elif page == "SQL Workbook":
                 st.error(err)
             elif df is not None:
                 st.dataframe(df, use_container_width=True)
+
+# ============================================================
+# WELLVIEW (SNOWFLAKE)
+# ============================================================
+elif page == "WellView (Snowflake)":
+    st.title("WellView — Snowflake")
+    st.markdown("Browse and query WellView data from Snowflake.")
+
+    if not SNOWFLAKE_AVAILABLE:
+        st.error("snowflake-connector-python is not installed. Add it to requirements.txt and redeploy.")
+        st.stop()
+
+    # --- Connection settings ---
+    with st.expander("Connection Settings", expanded=False):
+        sf_account = st.text_input("Account", value=DEFAULT_CONFIG["account"], key="sf_account")
+        sf_user = st.text_input("User", value=DEFAULT_CONFIG["user"], key="sf_user")
+        sf_password = st.text_input("Password", value=DEFAULT_CONFIG["password"], type="password", key="sf_password")
+        sf_warehouse = st.text_input("Warehouse", value=DEFAULT_CONFIG["warehouse"], key="sf_wh")
+        sf_database = st.text_input("Database", value=DEFAULT_CONFIG["database"], key="sf_db")
+        sf_schema_default = st.text_input("Default Schema", value=DEFAULT_CONFIG["schema"], key="sf_schema")
+
+    sf_config = {
+        "account": sf_account,
+        "user": sf_user,
+        "password": sf_password,
+        "warehouse": sf_warehouse,
+        "database": sf_database,
+        "schema": sf_schema_default,
+    }
+
+    # --- Test connection ---
+    if st.button("Test Snowflake Connection"):
+        with st.spinner("Connecting to Snowflake..."):
+            ok, msg = test_snowflake_connection(sf_config)
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+
+    st.divider()
+
+    # --- Schema & Table Browser ---
+    st.subheader("Table Browser")
+    col_left, col_right = st.columns([1, 2])
+
+    with col_left:
+        schemas, err = get_schemas(sf_config)
+        if err:
+            st.error(f"Could not list schemas: {err}")
+            schemas = []
+        chosen_schema = st.selectbox("Schema", schemas if schemas else [sf_schema_default], key="sf_chosen_schema")
+
+        tables_list, err = get_tables(chosen_schema, sf_config)
+        views_list, _ = get_views(chosen_schema, sf_config)
+        all_objects = sorted(
+            [f"TABLE: {t}" for t in (tables_list or [])] + [f"VIEW: {v}" for v in (views_list or [])]
+        )
+        chosen_obj = st.selectbox("Table / View", all_objects if all_objects else ["(none)"], key="sf_chosen_obj")
+
+    with col_right:
+        if chosen_obj and chosen_obj != "(none)":
+            obj_type, obj_name = chosen_obj.split(": ", 1)
+            # Show columns
+            col_df, err = get_columns(obj_name, chosen_schema, sf_config)
+            if err:
+                st.warning(f"Could not describe: {err}")
+            elif not col_df.empty:
+                st.markdown(f"**Columns in `{obj_name}`**")
+                st.dataframe(col_df, use_container_width=True, hide_index=True)
+
+            # Preview data
+            preview_limit = st.number_input("Preview rows", min_value=10, max_value=5000, value=100, step=50, key="sf_preview_limit")
+            if st.button("Preview Data", key="sf_preview_btn"):
+                with st.spinner("Fetching..."):
+                    df, err = preview_table(obj_name, chosen_schema, sf_config, limit=preview_limit)
+                if err:
+                    st.error(err)
+                elif df is not None:
+                    st.success(f"{len(df)} rows returned")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    csv = df.to_csv(index=False)
+                    st.download_button("Download CSV", csv, f"{obj_name}.csv", "text/csv", key="sf_dl_preview")
+
+    st.divider()
+
+    # --- Custom SQL ---
+    st.subheader("Snowflake SQL Query")
+    sf_query = st.text_area(
+        "SQL",
+        value=f'SELECT * FROM "{chosen_schema}"."<table>" LIMIT 100;' if chosen_schema else "SELECT 1;",
+        height=120,
+        key="sf_sql",
+    )
+    if st.button("Run Snowflake Query", key="sf_run_query"):
+        if sf_query.strip():
+            with st.spinner("Running query..."):
+                df, err = run_query(sf_query, sf_config)
+            if err:
+                st.error(f"Query error: {err}")
+            elif df is not None:
+                st.success(f"{len(df)} rows returned")
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                csv = df.to_csv(index=False)
+                st.download_button("Download CSV", csv, "snowflake_results.csv", "text/csv", key="sf_dl_query")
