@@ -1016,11 +1016,139 @@ elif page == "WellView (Snowflake)":
 
     st.divider()
 
+    # --- Data Extraction Panel ---
+    st.subheader("Data Extraction")
+    if chosen_obj and chosen_obj != "(none)":
+        _, extract_table = chosen_obj.split(": ", 1)
+        full_table = f'"{chosen_schema}"."{extract_table}"'
+
+        # Step 1: Load all column names for the selected table
+        col_df_ext, col_err = get_columns(extract_table, chosen_schema, sf_config)
+        if col_err:
+            st.error(f"Could not load columns: {col_err}")
+        elif not col_df_ext.empty:
+            all_col_names = col_df_ext["name"].tolist()
+
+            # Step 2: Pick columns
+            st.markdown("**1. Select Columns**")
+            select_all = st.checkbox("Select all columns", value=True, key="sf_ext_all")
+            if select_all:
+                selected_cols = all_col_names
+            else:
+                selected_cols = st.multiselect("Choose columns", all_col_names, default=all_col_names[:5], key="sf_ext_cols")
+
+            if not selected_cols:
+                st.warning("Select at least one column.")
+            else:
+                # Step 3: Filters
+                st.markdown("**2. Filter Rows (optional)**")
+                num_filters = st.number_input("Number of filters", min_value=0, max_value=10, value=0, step=1, key="sf_ext_nf")
+                filters = []
+                for i in range(int(num_filters)):
+                    fc1, fc2, fc3 = st.columns([2, 1, 2])
+                    with fc1:
+                        f_col = st.selectbox("Column", all_col_names, key=f"sf_fc_{i}")
+                    with fc2:
+                        f_op = st.selectbox("Operator", ["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"], key=f"sf_fo_{i}")
+                    with fc3:
+                        if f_op in ("IS NULL", "IS NOT NULL"):
+                            f_val = ""
+                        else:
+                            f_val = st.text_input("Value", key=f"sf_fv_{i}", help="For IN, comma-separate values")
+                    filters.append((f_col, f_op, f_val))
+
+                # Step 4: Sorting
+                st.markdown("**3. Sort & Limit**")
+                sc1, sc2, sc3 = st.columns(3)
+                with sc1:
+                    sort_col = st.selectbox("Sort by", ["(none)"] + all_col_names, key="sf_ext_sort")
+                with sc2:
+                    sort_dir = st.selectbox("Direction", ["ASC", "DESC"], key="sf_ext_dir")
+                with sc3:
+                    row_limit = st.number_input("Max rows", min_value=10, max_value=50000, value=1000, step=100, key="sf_ext_limit")
+
+                # Build query
+                cols_str = ", ".join(f'"{c}"' for c in selected_cols)
+                sql = f"SELECT {cols_str} FROM {full_table}"
+
+                where_parts = []
+                for f_col, f_op, f_val in filters:
+                    if f_op == "IS NULL":
+                        where_parts.append(f'"{f_col}" IS NULL')
+                    elif f_op == "IS NOT NULL":
+                        where_parts.append(f'"{f_col}" IS NOT NULL')
+                    elif f_op == "IN":
+                        vals = ", ".join(f"'{v.strip()}'" for v in f_val.split(","))
+                        where_parts.append(f'"{f_col}" IN ({vals})')
+                    elif f_op == "LIKE":
+                        where_parts.append(f'"{f_col}" LIKE \'{f_val}\'')
+                    else:
+                        where_parts.append(f'"{f_col}" {f_op} \'{f_val}\'')
+
+                if where_parts:
+                    sql += " WHERE " + " AND ".join(where_parts)
+                if sort_col != "(none)":
+                    sql += f' ORDER BY "{sort_col}" {sort_dir}'
+                sql += f" LIMIT {row_limit}"
+
+                # Show generated query
+                with st.expander("Generated SQL", expanded=False):
+                    st.code(sql, language="sql")
+
+                # Step 5: Extract
+                st.markdown("**4. Extract**")
+                if st.button("Extract Data", key="sf_extract_btn", type="primary"):
+                    with st.spinner("Extracting data from Snowflake..."):
+                        df, err = run_query(sql, sf_config, limit=int(row_limit))
+                    if err:
+                        st.error(f"Extraction error: {err}")
+                    elif df is not None and not df.empty:
+                        st.success(f"Extracted {len(df)} rows x {len(df.columns)} columns")
+                        st.session_state["sf_extracted_df"] = df
+                        st.session_state["sf_extracted_name"] = extract_table
+                    elif df is not None:
+                        st.info("Query returned 0 rows.")
+
+                # Show results if we have them
+                if "sf_extracted_df" in st.session_state and st.session_state.get("sf_extracted_name") == extract_table:
+                    df = st.session_state["sf_extracted_df"]
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    # Chart
+                    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+                    if len(numeric_cols) >= 1:
+                        with st.expander("Quick Chart"):
+                            all_df_cols = df.columns.tolist()
+                            cx = st.selectbox("X-Axis", all_df_cols, key="sf_ext_cx")
+                            cy = st.multiselect("Y-Axis", numeric_cols, default=numeric_cols[:2], key="sf_ext_cy")
+                            if cy:
+                                fig = go.Figure()
+                                for col in cy:
+                                    fig.add_trace(go.Scatter(x=df[cx], y=df[col], mode="lines+markers", name=col))
+                                fig.update_layout(template="plotly_white", height=500)
+                                st.plotly_chart(fig, use_container_width=True)
+
+                    # Export options
+                    st.markdown("**Export**")
+                    exp1, exp2 = st.columns(2)
+                    with exp1:
+                        csv = df.to_csv(index=False)
+                        st.download_button("Download CSV", csv, f"{extract_table}_extract.csv", "text/csv", key="sf_ext_dl_csv")
+                    with exp2:
+                        ds_name = st.text_input("Save to DB as", value=f"wv_{extract_table.lower()}", key="sf_ext_dbname")
+                        if st.button("Save to Database", key="sf_ext_save_db"):
+                            table = store_excel_data(ds_name, df, "Snowflake")
+                            st.success(f"Saved as `{table}` — available in SQL Workbook & Data Overlay")
+    else:
+        st.info("Select a table or view above to extract data.")
+
+    st.divider()
+
     # --- Custom SQL ---
     st.subheader("Snowflake SQL Query")
     sf_query = st.text_area(
         "SQL",
-        value=f'SELECT * FROM "{chosen_schema}"."<table>" LIMIT 100;' if chosen_schema else "SELECT 1;",
+        value=f'SELECT * FROM "{chosen_schema}"."<table>" LIMIT 100;' if chosen_obj and chosen_obj != "(none)" else "SELECT 1;",
         height=120,
         key="sf_sql",
     )
