@@ -368,7 +368,8 @@ with tab_chart:
         # CCI (20-period)
         tp = (hist["high"] + hist["low"] + hist["close"]) / 3
         tp_sma = tp.rolling(20).mean()
-        tp_mad = tp.rolling(20).apply(lambda x: (x - x.mean()).abs().mean(), raw=True)
+        import numpy as np
+        tp_mad = tp.rolling(20).apply(lambda x: np.mean(np.abs(x - np.mean(x))), raw=True)
         hist["CCI"] = (tp - tp_sma) / (0.015 * tp_mad)
 
         # ADX (14-period)
