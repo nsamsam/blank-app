@@ -14,6 +14,34 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Password Gate ────────────────────────────────────────────────────────────
+def check_password():
+    """Returns True if the user has entered the correct password."""
+    correct_password = st.secrets.get("APP_PASSWORD", "")
+    if not correct_password:
+        return True  # No password configured, allow access
+
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.title("📈 Stocks & Options Dashboard")
+    st.markdown("This dashboard is password-protected.")
+    password = st.text_input("Enter password", type="password")
+    if st.button("Login", type="primary"):
+        if password == correct_password:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+
+if not check_password():
+    st.stop()
+
 # ── Styling ──────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
