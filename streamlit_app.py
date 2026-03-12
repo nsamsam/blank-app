@@ -226,6 +226,22 @@ with st.sidebar:
     )
     chart_type = st.selectbox("Chart Type", ["Candlestick", "Line", "OHLC"], index=0)
 
+    st.divider()
+
+    st.header("📉 Overlays (on price)")
+    overlay_indicators = st.multiselect(
+        "Select overlays",
+        ["Bollinger Bands", "EMA 9", "EMA 21", "SMA 50", "Keltner Channels", "VWAP"],
+        default=["Bollinger Bands", "SMA 50"],
+    )
+
+    st.header("📊 Sub-Indicators")
+    sub_indicators = st.multiselect(
+        "Select indicators",
+        ["RSI", "MACD", "Momentum", "Stochastic", "CCI", "ADX", "ATR", "OBV"],
+        default=["RSI", "MACD"],
+    )
+
 # ── Period mapping ───────────────────────────────────────────────────────────
 PERIOD_DAYS = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "2Y": 730}
 
@@ -302,108 +318,215 @@ with tab_chart:
     hist = api.get_history(symbol, interval=chart_interval, start=start_date)
 
     if hist is not None and not hist.empty:
+        # ── Calculate ALL indicators ─────────────────────────────────
+
+        # Bollinger Bands (20-period, 2 std dev)
+        hist["BB_MID"] = hist["close"].rolling(20).mean()
+        hist["BB_STD"] = hist["close"].rolling(20).std()
+        hist["BB_UPPER"] = hist["BB_MID"] + 2 * hist["BB_STD"]
+        hist["BB_LOWER"] = hist["BB_MID"] - 2 * hist["BB_STD"]
+
+        # EMAs
+        hist["EMA9"] = hist["close"].ewm(span=9, adjust=False).mean()
+        hist["EMA21"] = hist["close"].ewm(span=21, adjust=False).mean()
+        hist["SMA50"] = hist["close"].rolling(50).mean()
+
+        # Keltner Channels (20-period EMA, 1.5x ATR)
+        hist["KC_MID"] = hist["close"].ewm(span=20, adjust=False).mean()
+        tr = pd.concat([
+            hist["high"] - hist["low"],
+            (hist["high"] - hist["close"].shift()).abs(),
+            (hist["low"] - hist["close"].shift()).abs(),
+        ], axis=1).max(axis=1)
+        hist["ATR14"] = tr.rolling(14).mean()
+        hist["KC_UPPER"] = hist["KC_MID"] + 1.5 * hist["ATR14"]
+        hist["KC_LOWER"] = hist["KC_MID"] - 1.5 * hist["ATR14"]
+
+        # RSI (14-period)
+        delta_c = hist["close"].diff()
+        gain = delta_c.where(delta_c > 0, 0.0).rolling(14).mean()
+        loss = (-delta_c.where(delta_c < 0, 0.0)).rolling(14).mean()
+        rs = gain / loss.replace(0, float("nan"))
+        hist["RSI"] = 100 - (100 / (1 + rs))
+
+        # MACD (12, 26, 9)
+        ema12 = hist["close"].ewm(span=12, adjust=False).mean()
+        ema26 = hist["close"].ewm(span=26, adjust=False).mean()
+        hist["MACD"] = ema12 - ema26
+        hist["MACD_SIGNAL"] = hist["MACD"].ewm(span=9, adjust=False).mean()
+        hist["MACD_HIST"] = hist["MACD"] - hist["MACD_SIGNAL"]
+
+        # Momentum (10-period rate of change)
+        hist["MOM"] = hist["close"].pct_change(10) * 100
+
+        # Stochastic Oscillator (14-period)
+        low14 = hist["low"].rolling(14).min()
+        high14 = hist["high"].rolling(14).max()
+        hist["STOCH_K"] = ((hist["close"] - low14) / (high14 - low14)) * 100
+        hist["STOCH_D"] = hist["STOCH_K"].rolling(3).mean()
+
+        # CCI (20-period)
+        tp = (hist["high"] + hist["low"] + hist["close"]) / 3
+        tp_sma = tp.rolling(20).mean()
+        tp_mad = tp.rolling(20).apply(lambda x: (x - x.mean()).abs().mean(), raw=True)
+        hist["CCI"] = (tp - tp_sma) / (0.015 * tp_mad)
+
+        # ADX (14-period)
+        plus_dm = hist["high"].diff()
+        minus_dm = -hist["low"].diff()
+        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+        minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+        atr14_smooth = tr.ewm(span=14, adjust=False).mean()
+        plus_di = 100 * (plus_dm.ewm(span=14, adjust=False).mean() / atr14_smooth)
+        minus_di = 100 * (minus_dm.ewm(span=14, adjust=False).mean() / atr14_smooth)
+        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, float("nan")))
+        hist["ADX"] = dx.ewm(span=14, adjust=False).mean()
+        hist["PLUS_DI"] = plus_di
+        hist["MINUS_DI"] = minus_di
+
+        # OBV (On-Balance Volume)
+        obv_sign = hist["close"].diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        hist["OBV"] = (obv_sign * hist["volume"]).cumsum()
+
+        # VWAP (cumulative)
+        hist["VWAP"] = (((hist["high"] + hist["low"] + hist["close"]) / 3) * hist["volume"]).cumsum() / hist["volume"].cumsum()
+
+        # ── Build dynamic subplot layout ─────────────────────────────
+        n_subs = len(sub_indicators)
+        total_rows = 2 + n_subs  # price + volume + each sub-indicator
+
+        price_height = 0.40
+        vol_height = 0.10
+        remaining = 1.0 - price_height - vol_height
+        sub_height = remaining / max(n_subs, 1)
+
+        row_heights = [price_height, vol_height] + [sub_height] * n_subs
+        subplot_titles = ["", "Volume"] + sub_indicators
+
         fig = make_subplots(
-            rows=2,
+            rows=total_rows,
             cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.03,
-            row_heights=[0.75, 0.25],
+            vertical_spacing=0.025,
+            row_heights=row_heights,
+            subplot_titles=subplot_titles,
         )
 
+        # ── Row 1: Price chart ───────────────────────────────────────
         if chart_type == "Candlestick":
             fig.add_trace(
                 go.Candlestick(
-                    x=hist["date"],
-                    open=hist["open"],
-                    high=hist["high"],
-                    low=hist["low"],
-                    close=hist["close"],
-                    name="Price",
-                ),
-                row=1,
-                col=1,
+                    x=hist["date"], open=hist["open"], high=hist["high"],
+                    low=hist["low"], close=hist["close"], name="Price",
+                ), row=1, col=1,
             )
         elif chart_type == "Line":
             fig.add_trace(
                 go.Scatter(
-                    x=hist["date"],
-                    y=hist["close"],
-                    mode="lines",
-                    name="Close",
-                    line=dict(color="#00b4d8", width=2),
-                ),
-                row=1,
-                col=1,
+                    x=hist["date"], y=hist["close"], mode="lines",
+                    name="Close", line=dict(color="#00b4d8", width=2),
+                ), row=1, col=1,
             )
-        else:  # OHLC
+        else:
             fig.add_trace(
                 go.Ohlc(
-                    x=hist["date"],
-                    open=hist["open"],
-                    high=hist["high"],
-                    low=hist["low"],
-                    close=hist["close"],
-                    name="Price",
-                ),
-                row=1,
-                col=1,
+                    x=hist["date"], open=hist["open"], high=hist["high"],
+                    low=hist["low"], close=hist["close"], name="Price",
+                ), row=1, col=1,
             )
 
-        # Moving averages
-        if len(hist) >= 20:
-            hist["SMA20"] = hist["close"].rolling(20).mean()
-            fig.add_trace(
-                go.Scatter(
-                    x=hist["date"],
-                    y=hist["SMA20"],
-                    mode="lines",
-                    name="SMA 20",
-                    line=dict(color="#ffd60a", width=1, dash="dot"),
-                ),
-                row=1,
-                col=1,
-            )
-        if len(hist) >= 50:
-            hist["SMA50"] = hist["close"].rolling(50).mean()
-            fig.add_trace(
-                go.Scatter(
-                    x=hist["date"],
-                    y=hist["SMA50"],
-                    mode="lines",
-                    name="SMA 50",
-                    line=dict(color="#ff6b6b", width=1, dash="dot"),
-                ),
-                row=1,
-                col=1,
-            )
+        # ── Overlay indicators on price ──────────────────────────────
+        if "Bollinger Bands" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["BB_UPPER"], mode="lines", name="BB Upper", line=dict(color="#636efa", width=1, dash="dash")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["BB_MID"], mode="lines", name="BB Mid", line=dict(color="#ffd60a", width=1, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["BB_LOWER"], mode="lines", name="BB Lower", line=dict(color="#636efa", width=1, dash="dash"), fill="tonexty", fillcolor="rgba(99,110,250,0.08)"), row=1, col=1)
 
-        # Volume bars
-        colors = [
-            "#00c853" if row.close >= row.open else "#ff1744"
-            for _, row in hist.iterrows()
-        ]
-        fig.add_trace(
-            go.Bar(
-                x=hist["date"],
-                y=hist["volume"],
-                marker_color=colors,
-                name="Volume",
-                opacity=0.5,
-            ),
-            row=2,
-            col=1,
-        )
+        if "EMA 9" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["EMA9"], mode="lines", name="EMA 9", line=dict(color="#00e5ff", width=1)), row=1, col=1)
 
+        if "EMA 21" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["EMA21"], mode="lines", name="EMA 21", line=dict(color="#76ff03", width=1)), row=1, col=1)
+
+        if "SMA 50" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["SMA50"], mode="lines", name="SMA 50", line=dict(color="#ff6b6b", width=1, dash="dot")), row=1, col=1)
+
+        if "Keltner Channels" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["KC_UPPER"], mode="lines", name="KC Upper", line=dict(color="#ff9800", width=1, dash="dash")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["KC_MID"], mode="lines", name="KC Mid", line=dict(color="#ff9800", width=1, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["KC_LOWER"], mode="lines", name="KC Lower", line=dict(color="#ff9800", width=1, dash="dash"), fill="tonexty", fillcolor="rgba(255,152,0,0.06)"), row=1, col=1)
+
+        if "VWAP" in overlay_indicators:
+            fig.add_trace(go.Scatter(x=hist["date"], y=hist["VWAP"], mode="lines", name="VWAP", line=dict(color="#ffeb3b", width=1.5)), row=1, col=1)
+
+        # ── Row 2: Volume ────────────────────────────────────────────
+        vol_colors = ["#00c853" if row.close >= row.open else "#ff1744" for _, row in hist.iterrows()]
+        fig.add_trace(go.Bar(x=hist["date"], y=hist["volume"], marker_color=vol_colors, name="Volume", opacity=0.5), row=2, col=1)
+
+        # ── Sub-indicator rows ───────────────────────────────────────
+        for i, ind in enumerate(sub_indicators):
+            row_num = 3 + i
+
+            if ind == "RSI":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["RSI"], mode="lines", name="RSI", line=dict(color="#e040fb", width=1.5)), row=row_num, col=1)
+                fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=0.8, row=row_num, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=0.8, row=row_num, col=1)
+                fig.update_yaxes(title_text="RSI", range=[0, 100], row=row_num, col=1)
+
+            elif ind == "MACD":
+                macd_colors = ["#00c853" if v >= 0 else "#ff1744" for v in hist["MACD_HIST"].fillna(0)]
+                fig.add_trace(go.Bar(x=hist["date"], y=hist["MACD_HIST"], marker_color=macd_colors, name="MACD Hist", opacity=0.5), row=row_num, col=1)
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["MACD"], mode="lines", name="MACD", line=dict(color="#00b4d8", width=1.5)), row=row_num, col=1)
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["MACD_SIGNAL"], mode="lines", name="Signal", line=dict(color="#ff6b6b", width=1)), row=row_num, col=1)
+                fig.add_hline(y=0, line_color="white", line_width=0.5, row=row_num, col=1)
+                fig.update_yaxes(title_text="MACD", row=row_num, col=1)
+
+            elif ind == "Momentum":
+                mom_colors = ["#00c853" if v >= 0 else "#ff1744" for v in hist["MOM"].fillna(0)]
+                fig.add_trace(go.Bar(x=hist["date"], y=hist["MOM"], marker_color=mom_colors, name="Momentum %", opacity=0.7), row=row_num, col=1)
+                fig.add_hline(y=0, line_color="white", line_width=0.5, row=row_num, col=1)
+                fig.update_yaxes(title_text="Mom %", row=row_num, col=1)
+
+            elif ind == "Stochastic":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["STOCH_K"], mode="lines", name="%K", line=dict(color="#00b4d8", width=1.5)), row=row_num, col=1)
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["STOCH_D"], mode="lines", name="%D", line=dict(color="#ff6b6b", width=1)), row=row_num, col=1)
+                fig.add_hline(y=80, line_dash="dash", line_color="red", line_width=0.8, row=row_num, col=1)
+                fig.add_hline(y=20, line_dash="dash", line_color="green", line_width=0.8, row=row_num, col=1)
+                fig.update_yaxes(title_text="Stoch", range=[0, 100], row=row_num, col=1)
+
+            elif ind == "CCI":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["CCI"], mode="lines", name="CCI", line=dict(color="#ab47bc", width=1.5)), row=row_num, col=1)
+                fig.add_hline(y=100, line_dash="dash", line_color="red", line_width=0.8, row=row_num, col=1)
+                fig.add_hline(y=-100, line_dash="dash", line_color="green", line_width=0.8, row=row_num, col=1)
+                fig.add_hline(y=0, line_color="white", line_width=0.5, row=row_num, col=1)
+                fig.update_yaxes(title_text="CCI", row=row_num, col=1)
+
+            elif ind == "ADX":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["ADX"], mode="lines", name="ADX", line=dict(color="#ffeb3b", width=1.5)), row=row_num, col=1)
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["PLUS_DI"], mode="lines", name="+DI", line=dict(color="#00c853", width=1, dash="dot")), row=row_num, col=1)
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["MINUS_DI"], mode="lines", name="-DI", line=dict(color="#ff1744", width=1, dash="dot")), row=row_num, col=1)
+                fig.add_hline(y=25, line_dash="dash", line_color="gray", line_width=0.8, row=row_num, col=1)
+                fig.update_yaxes(title_text="ADX", row=row_num, col=1)
+
+            elif ind == "ATR":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["ATR14"], mode="lines", name="ATR (14)", line=dict(color="#ff9800", width=1.5)), row=row_num, col=1)
+                fig.update_yaxes(title_text="ATR", row=row_num, col=1)
+
+            elif ind == "OBV":
+                fig.add_trace(go.Scatter(x=hist["date"], y=hist["OBV"], mode="lines", name="OBV", line=dict(color="#26c6da", width=1.5), fill="tozeroy", fillcolor="rgba(38,198,218,0.1)"), row=row_num, col=1)
+                fig.update_yaxes(title_text="OBV", row=row_num, col=1)
+
+        # ── Layout ───────────────────────────────────────────────────
+        chart_height = 500 + (n_subs * 150)
         fig.update_layout(
             template="plotly_dark",
-            height=600,
+            height=chart_height,
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis_rangeslider_visible=False,
             showlegend=True,
             legend=dict(orientation="h", y=1.02, x=0),
         )
         fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-        fig.update_yaxes(title_text="Volume", row=2, col=1)
+        fig.update_yaxes(title_text="Vol", row=2, col=1)
 
         st.plotly_chart(fig, use_container_width=True)
 
