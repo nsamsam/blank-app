@@ -302,14 +302,33 @@ with tab_chart:
     hist = api.get_history(symbol, interval=chart_interval, start=start_date)
 
     if hist is not None and not hist.empty:
+        # ── Calculate indicators ─────────────────────────────────────
+        # Bollinger Bands (20-period, 2 std dev)
+        hist["BB_MID"] = hist["close"].rolling(20).mean()
+        hist["BB_STD"] = hist["close"].rolling(20).std()
+        hist["BB_UPPER"] = hist["BB_MID"] + 2 * hist["BB_STD"]
+        hist["BB_LOWER"] = hist["BB_MID"] - 2 * hist["BB_STD"]
+
+        # RSI (14-period)
+        delta = hist["close"].diff()
+        gain = delta.where(delta > 0, 0.0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
+        rs = gain / loss.replace(0, float("nan"))
+        hist["RSI"] = 100 - (100 / (1 + rs))
+
+        # Momentum (10-period rate of change)
+        hist["MOM"] = hist["close"].pct_change(10) * 100
+
         fig = make_subplots(
-            rows=2,
+            rows=4,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.03,
-            row_heights=[0.75, 0.25],
+            row_heights=[0.45, 0.15, 0.20, 0.20],
+            subplot_titles=["", "Volume", "RSI (14)", "Momentum (10)"],
         )
 
+        # ── Price chart ──────────────────────────────────────────────
         if chart_type == "Candlestick":
             fig.add_trace(
                 go.Candlestick(
@@ -349,20 +368,35 @@ with tab_chart:
                 col=1,
             )
 
+        # ── Bollinger Bands ──────────────────────────────────────────
+        fig.add_trace(
+            go.Scatter(
+                x=hist["date"], y=hist["BB_UPPER"],
+                mode="lines", name="BB Upper",
+                line=dict(color="#636efa", width=1, dash="dash"),
+            ),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=hist["date"], y=hist["BB_MID"],
+                mode="lines", name="BB Mid (SMA 20)",
+                line=dict(color="#ffd60a", width=1, dash="dot"),
+            ),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=hist["date"], y=hist["BB_LOWER"],
+                mode="lines", name="BB Lower",
+                line=dict(color="#636efa", width=1, dash="dash"),
+                fill="tonexty",
+                fillcolor="rgba(99, 110, 250, 0.08)",
+            ),
+            row=1, col=1,
+        )
+
         # Moving averages
-        if len(hist) >= 20:
-            hist["SMA20"] = hist["close"].rolling(20).mean()
-            fig.add_trace(
-                go.Scatter(
-                    x=hist["date"],
-                    y=hist["SMA20"],
-                    mode="lines",
-                    name="SMA 20",
-                    line=dict(color="#ffd60a", width=1, dash="dot"),
-                ),
-                row=1,
-                col=1,
-            )
         if len(hist) >= 50:
             hist["SMA50"] = hist["close"].rolling(50).mean()
             fig.add_trace(
@@ -377,7 +411,7 @@ with tab_chart:
                 col=1,
             )
 
-        # Volume bars
+        # ── Volume bars ──────────────────────────────────────────────
         colors = [
             "#00c853" if row.close >= row.open else "#ff1744"
             for _, row in hist.iterrows()
@@ -394,16 +428,45 @@ with tab_chart:
             col=1,
         )
 
+        # ── RSI ──────────────────────────────────────────────────────
+        fig.add_trace(
+            go.Scatter(
+                x=hist["date"], y=hist["RSI"],
+                mode="lines", name="RSI",
+                line=dict(color="#e040fb", width=1.5),
+            ),
+            row=3, col=1,
+        )
+        # Overbought / oversold lines
+        fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=0.8, row=3, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=0.8, row=3, col=1)
+        fig.add_hrect(y0=30, y1=70, fillcolor="gray", opacity=0.05, row=3, col=1)
+
+        # ── Momentum ────────────────────────────────────────────────
+        mom_colors = ["#00c853" if v >= 0 else "#ff1744" for v in hist["MOM"].fillna(0)]
+        fig.add_trace(
+            go.Bar(
+                x=hist["date"], y=hist["MOM"],
+                marker_color=mom_colors,
+                name="Momentum %",
+                opacity=0.7,
+            ),
+            row=4, col=1,
+        )
+        fig.add_hline(y=0, line_color="white", line_width=0.5, row=4, col=1)
+
         fig.update_layout(
             template="plotly_dark",
-            height=600,
+            height=900,
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis_rangeslider_visible=False,
             showlegend=True,
             legend=dict(orientation="h", y=1.02, x=0),
         )
         fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-        fig.update_yaxes(title_text="Volume", row=2, col=1)
+        fig.update_yaxes(title_text="Vol", row=2, col=1)
+        fig.update_yaxes(title_text="RSI", range=[0, 100], row=3, col=1)
+        fig.update_yaxes(title_text="Mom %", row=4, col=1)
 
         st.plotly_chart(fig, use_container_width=True)
 
