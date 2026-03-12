@@ -1,10 +1,12 @@
 import streamlit as st
 import requests
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import json
+import math
 
 # ── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -305,8 +307,8 @@ with st.expander("📋 Full Quote Details", expanded=False):
         detail_cols[i % 4].markdown(f"**{label}:** {value}")
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_chart, tab_intraday, tab_options, tab_greeks = st.tabs(
-    ["📈 Price Chart", "⏱️ Intraday", "🔗 Options Chain", "🇬🇷 Greeks & Analysis"]
+tab_chart, tab_intraday, tab_options, tab_greeks, tab_pnl, tab_analysis, tab_watchlist = st.tabs(
+    ["📈 Price Chart", "⏱️ Intraday", "🔗 Options Chain", "🇬🇷 Greeks", "💰 P/L Calculator", "🔬 Options Analysis", "📋 Watchlist"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -368,7 +370,6 @@ with tab_chart:
         # CCI (20-period)
         tp = (hist["high"] + hist["low"] + hist["close"]) / 3
         tp_sma = tp.rolling(20).mean()
-        import numpy as np
         tp_mad = tp.rolling(20).apply(lambda x: np.mean(np.abs(x - np.mean(x))), raw=True)
         hist["CCI"] = (tp - tp_sma) / (0.015 * tp_mad)
 
@@ -848,6 +849,366 @@ with tab_greeks:
                 st.warning("No Greeks data available for this expiration.")
         else:
             st.warning("No option chain or Greeks data available.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — Options P/L Calculator
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_pnl:
+    st.subheader("Options Profit/Loss Calculator")
+
+    pnl_col1, pnl_col2 = st.columns(2)
+
+    with pnl_col1:
+        strategy = st.selectbox(
+            "Strategy",
+            ["Long Call", "Long Put", "Short Call", "Short Put",
+             "Bull Call Spread", "Bear Put Spread", "Iron Condor", "Straddle", "Strangle"],
+            key="pnl_strategy",
+        )
+
+    with pnl_col2:
+        contracts = st.number_input("Number of Contracts", min_value=1, value=1, key="pnl_contracts")
+
+    st.divider()
+
+    # Single-leg strategies
+    if strategy in ["Long Call", "Long Put", "Short Call", "Short Put"]:
+        pc1, pc2, pc3 = st.columns(3)
+        strike_pnl = pc1.number_input("Strike Price", value=float(round(last_price)), step=1.0, key="pnl_strike")
+        premium = pc2.number_input("Premium (per share)", value=5.0, step=0.1, key="pnl_premium")
+        dte_pnl = pc3.number_input("Days to Expiry", value=30, min_value=1, key="pnl_dte")
+
+        price_range = np.linspace(last_price * 0.7, last_price * 1.3, 200)
+
+        if strategy == "Long Call":
+            pnl = (np.maximum(price_range - strike_pnl, 0) - premium) * 100 * contracts
+            breakeven = strike_pnl + premium
+            max_profit = "Unlimited"
+            max_loss = f"${premium * 100 * contracts:,.0f}"
+        elif strategy == "Long Put":
+            pnl = (np.maximum(strike_pnl - price_range, 0) - premium) * 100 * contracts
+            breakeven = strike_pnl - premium
+            max_profit = f"${(strike_pnl - premium) * 100 * contracts:,.0f}"
+            max_loss = f"${premium * 100 * contracts:,.0f}"
+        elif strategy == "Short Call":
+            pnl = (premium - np.maximum(price_range - strike_pnl, 0)) * 100 * contracts
+            breakeven = strike_pnl + premium
+            max_profit = f"${premium * 100 * contracts:,.0f}"
+            max_loss = "Unlimited"
+        else:  # Short Put
+            pnl = (premium - np.maximum(strike_pnl - price_range, 0)) * 100 * contracts
+            breakeven = strike_pnl - premium
+            max_profit = f"${premium * 100 * contracts:,.0f}"
+            max_loss = f"${(strike_pnl - premium) * 100 * contracts:,.0f}"
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Breakeven", f"${breakeven:,.2f}")
+        m2.metric("Max Profit", max_profit)
+        m3.metric("Max Loss", max_loss)
+        m4.metric("Cost", f"${premium * 100 * contracts:,.0f}")
+
+    elif strategy == "Bull Call Spread":
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        long_strike = pc1.number_input("Long Call Strike", value=float(round(last_price - 5)), step=1.0, key="bull_long")
+        long_premium = pc2.number_input("Long Premium", value=8.0, step=0.1, key="bull_long_p")
+        short_strike = pc3.number_input("Short Call Strike", value=float(round(last_price + 5)), step=1.0, key="bull_short")
+        short_premium = pc4.number_input("Short Premium", value=3.0, step=0.1, key="bull_short_p")
+
+        price_range = np.linspace(last_price * 0.7, last_price * 1.3, 200)
+        net_debit = long_premium - short_premium
+        pnl = (np.maximum(price_range - long_strike, 0) - np.maximum(price_range - short_strike, 0) - net_debit) * 100 * contracts
+        breakeven = long_strike + net_debit
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Breakeven", f"${breakeven:,.2f}")
+        m2.metric("Max Profit", f"${(short_strike - long_strike - net_debit) * 100 * contracts:,.0f}")
+        m3.metric("Max Loss", f"${net_debit * 100 * contracts:,.0f}")
+
+    elif strategy == "Bear Put Spread":
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        long_strike = pc1.number_input("Long Put Strike", value=float(round(last_price + 5)), step=1.0, key="bear_long")
+        long_premium = pc2.number_input("Long Premium", value=8.0, step=0.1, key="bear_long_p")
+        short_strike = pc3.number_input("Short Put Strike", value=float(round(last_price - 5)), step=1.0, key="bear_short")
+        short_premium = pc4.number_input("Short Premium", value=3.0, step=0.1, key="bear_short_p")
+
+        price_range = np.linspace(last_price * 0.7, last_price * 1.3, 200)
+        net_debit = long_premium - short_premium
+        pnl = (np.maximum(long_strike - price_range, 0) - np.maximum(short_strike - price_range, 0) - net_debit) * 100 * contracts
+        breakeven = long_strike - net_debit
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Breakeven", f"${breakeven:,.2f}")
+        m2.metric("Max Profit", f"${(long_strike - short_strike - net_debit) * 100 * contracts:,.0f}")
+        m3.metric("Max Loss", f"${net_debit * 100 * contracts:,.0f}")
+
+    elif strategy == "Iron Condor":
+        st.markdown("**Sell OTM Call & Put, Buy further OTM Call & Put**")
+        ic1, ic2, ic3, ic4 = st.columns(4)
+        put_buy = ic1.number_input("Buy Put Strike", value=float(round(last_price - 15)), step=1.0, key="ic_pb")
+        put_sell = ic2.number_input("Sell Put Strike", value=float(round(last_price - 5)), step=1.0, key="ic_ps")
+        call_sell = ic3.number_input("Sell Call Strike", value=float(round(last_price + 5)), step=1.0, key="ic_cs")
+        call_buy = ic4.number_input("Buy Call Strike", value=float(round(last_price + 15)), step=1.0, key="ic_cb")
+        net_credit = st.number_input("Net Credit Received (per share)", value=2.0, step=0.1, key="ic_credit")
+
+        price_range = np.linspace(last_price * 0.6, last_price * 1.4, 200)
+        put_spread_pnl = np.maximum(put_sell - price_range, 0) - np.maximum(put_buy - price_range, 0)
+        call_spread_pnl = np.maximum(price_range - call_sell, 0) - np.maximum(price_range - call_buy, 0)
+        pnl = (net_credit - put_spread_pnl - call_spread_pnl) * 100 * contracts
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Max Profit", f"${net_credit * 100 * contracts:,.0f}")
+        wing_width = max(put_sell - put_buy, call_buy - call_sell)
+        m2.metric("Max Loss", f"${(wing_width - net_credit) * 100 * contracts:,.0f}")
+        m3.metric("Breakevens", f"${put_sell - net_credit:,.2f} / ${call_sell + net_credit:,.2f}")
+
+    elif strategy == "Straddle":
+        pc1, pc2 = st.columns(2)
+        strike_pnl = pc1.number_input("Strike (ATM)", value=float(round(last_price)), step=1.0, key="strad_strike")
+        total_premium = pc2.number_input("Total Premium (Call + Put)", value=10.0, step=0.1, key="strad_prem")
+
+        price_range = np.linspace(last_price * 0.7, last_price * 1.3, 200)
+        pnl = (np.maximum(price_range - strike_pnl, 0) + np.maximum(strike_pnl - price_range, 0) - total_premium) * 100 * contracts
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Upper Breakeven", f"${strike_pnl + total_premium:,.2f}")
+        m2.metric("Lower Breakeven", f"${strike_pnl - total_premium:,.2f}")
+        m3.metric("Max Loss", f"${total_premium * 100 * contracts:,.0f}")
+
+    else:  # Strangle
+        pc1, pc2, pc3 = st.columns(3)
+        put_strike = pc1.number_input("Put Strike (OTM)", value=float(round(last_price - 10)), step=1.0, key="strang_ps")
+        call_strike = pc2.number_input("Call Strike (OTM)", value=float(round(last_price + 10)), step=1.0, key="strang_cs")
+        total_premium = pc3.number_input("Total Premium", value=6.0, step=0.1, key="strang_prem")
+
+        price_range = np.linspace(last_price * 0.6, last_price * 1.4, 200)
+        pnl = (np.maximum(price_range - call_strike, 0) + np.maximum(put_strike - price_range, 0) - total_premium) * 100 * contracts
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Upper Breakeven", f"${call_strike + total_premium:,.2f}")
+        m2.metric("Lower Breakeven", f"${put_strike - total_premium:,.2f}")
+        m3.metric("Max Loss", f"${total_premium * 100 * contracts:,.0f}")
+
+    # P/L Chart
+    pnl_fig = go.Figure()
+    pnl_fig.add_trace(go.Scatter(
+        x=price_range, y=pnl, mode="lines", name="P/L at Expiry",
+        line=dict(color="#00b4d8", width=2),
+    ))
+    pnl_fig.add_trace(go.Scatter(
+        x=price_range, y=np.where(pnl >= 0, pnl, 0), mode="lines",
+        fill="tozeroy", fillcolor="rgba(0,200,83,0.2)", line=dict(width=0), showlegend=False,
+    ))
+    pnl_fig.add_trace(go.Scatter(
+        x=price_range, y=np.where(pnl < 0, pnl, 0), mode="lines",
+        fill="tozeroy", fillcolor="rgba(255,23,68,0.2)", line=dict(width=0), showlegend=False,
+    ))
+    pnl_fig.add_hline(y=0, line_color="white", line_width=0.8)
+    pnl_fig.add_vline(x=last_price, line_dash="dash", line_color="yellow", annotation_text=f"Current ${last_price:.2f}")
+    pnl_fig.update_layout(
+        template="plotly_dark", height=450,
+        xaxis_title="Stock Price at Expiry", yaxis_title="Profit / Loss ($)",
+        margin=dict(l=0, r=0, t=30, b=0),
+    )
+    st.plotly_chart(pnl_fig, use_container_width=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — Options Analysis
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_analysis:
+    st.subheader("Advanced Options Analysis")
+
+    expirations_a = api.get_option_expirations(symbol)
+    if not expirations_a:
+        st.info(f"No option data for **{symbol}**.")
+    else:
+        # ── IV Term Structure ────────────────────────────────────────
+        st.markdown("### IV Term Structure")
+        exp_ivs = []
+        for exp_date in expirations_a[:8]:
+            ch = api.get_option_chain(symbol, exp_date)
+            if ch is not None and not ch.empty and "greeks" in ch.columns:
+                valid = ch["greeks"].notna()
+                if valid.any():
+                    gdf = pd.json_normalize(ch.loc[valid, "greeks"])
+                    if "mid_iv" in gdf.columns:
+                        ch.loc[valid, "mid_iv"] = gdf["mid_iv"].values
+                        ch["mid_iv"] = pd.to_numeric(ch["mid_iv"], errors="coerce")
+                        ch["strike"] = pd.to_numeric(ch["strike"], errors="coerce")
+                        atm = ch.iloc[(ch["strike"] - last_price).abs().argsort()[:4]]
+                        avg_iv = atm["mid_iv"].mean()
+                        if not pd.isna(avg_iv):
+                            dte_a = (pd.to_datetime(exp_date) - pd.Timestamp.now()).days
+                            exp_ivs.append({"expiration": exp_date, "dte": dte_a, "atm_iv": avg_iv * 100})
+
+        if exp_ivs:
+            term_df = pd.DataFrame(exp_ivs)
+            term_fig = go.Figure()
+            term_fig.add_trace(go.Scatter(
+                x=term_df["dte"], y=term_df["atm_iv"],
+                mode="lines+markers+text", name="ATM IV",
+                text=[f"{v:.1f}%" for v in term_df["atm_iv"]],
+                textposition="top center",
+                line=dict(color="#e040fb", width=2), marker=dict(size=8),
+            ))
+            term_fig.update_layout(
+                template="plotly_dark", height=350,
+                xaxis_title="Days to Expiration", yaxis_title="ATM Implied Volatility (%)",
+                margin=dict(l=0, r=0, t=30, b=0),
+            )
+            st.plotly_chart(term_fig, use_container_width=True)
+
+        # ── Unusual Options Activity ─────────────────────────────────
+        st.markdown("### Unusual Options Activity")
+        sel_exp_ua = st.selectbox("Expiration for Analysis", expirations_a, key="ua_exp")
+        chain_ua = api.get_option_chain(symbol, sel_exp_ua)
+
+        if chain_ua is not None and not chain_ua.empty:
+            chain_ua["strike"] = pd.to_numeric(chain_ua["strike"], errors="coerce")
+            chain_ua["volume"] = pd.to_numeric(chain_ua.get("volume", 0), errors="coerce").fillna(0)
+            chain_ua["open_interest"] = pd.to_numeric(chain_ua.get("open_interest", 0), errors="coerce").fillna(0)
+            chain_ua["last"] = pd.to_numeric(chain_ua.get("last", 0), errors="coerce").fillna(0)
+
+            chain_ua["vol_oi_ratio"] = np.where(chain_ua["open_interest"] > 0, chain_ua["volume"] / chain_ua["open_interest"], 0)
+            chain_ua["dollar_volume"] = chain_ua["volume"] * chain_ua["last"] * 100
+
+            active = chain_ua[(chain_ua["volume"] > 10) & (chain_ua["open_interest"] > 0)].copy()
+
+            if not active.empty:
+                unusual = active.nlargest(15, "vol_oi_ratio")
+                ua_display = unusual[["option_type", "strike", "last", "volume", "open_interest", "vol_oi_ratio", "dollar_volume"]].copy()
+                ua_display["vol_oi_ratio"] = ua_display["vol_oi_ratio"].round(2)
+                ua_display["dollar_volume"] = ua_display["dollar_volume"].apply(lambda x: f"${x:,.0f}")
+                ua_display.columns = ["Type", "Strike", "Last", "Volume", "OI", "Vol/OI", "$ Volume"]
+                st.dataframe(ua_display, use_container_width=True, hide_index=True)
+
+                # Volume heatmap
+                st.markdown("### Volume by Strike")
+                calls_ua = chain_ua[chain_ua["option_type"] == "call"].sort_values("strike")
+                puts_ua = chain_ua[chain_ua["option_type"] == "put"].sort_values("strike")
+
+                heat_fig = make_subplots(rows=1, cols=2, subplot_titles=["Call Volume", "Put Volume"])
+                if not calls_ua.empty:
+                    heat_fig.add_trace(go.Bar(x=calls_ua["strike"], y=calls_ua["volume"], marker_color="#00c853", name="Call Vol", opacity=0.7), row=1, col=1)
+                if not puts_ua.empty:
+                    heat_fig.add_trace(go.Bar(x=puts_ua["strike"], y=puts_ua["volume"], marker_color="#ff1744", name="Put Vol", opacity=0.7), row=1, col=2)
+                for col_n in [1, 2]:
+                    heat_fig.add_vline(x=last_price, line_dash="dash", line_color="yellow", row=1, col=col_n)
+                heat_fig.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0), showlegend=False)
+                st.plotly_chart(heat_fig, use_container_width=True)
+
+                # Max Pain
+                st.markdown("### Max Pain Analysis")
+                strikes_mp = sorted(chain_ua["strike"].unique())
+                pain = []
+                for s in strikes_mp:
+                    call_pain = chain_ua[chain_ua["option_type"] == "call"].apply(
+                        lambda r: max(s - r["strike"], 0) * r["open_interest"], axis=1).sum()
+                    put_pain = chain_ua[chain_ua["option_type"] == "put"].apply(
+                        lambda r: max(r["strike"] - s, 0) * r["open_interest"], axis=1).sum()
+                    pain.append({"strike": s, "total_pain": call_pain + put_pain})
+
+                pain_df = pd.DataFrame(pain)
+                if not pain_df.empty:
+                    max_pain_strike = pain_df.loc[pain_df["total_pain"].idxmin(), "strike"]
+                    pain_fig = go.Figure()
+                    pain_fig.add_trace(go.Bar(
+                        x=pain_df["strike"], y=pain_df["total_pain"],
+                        marker_color=np.where(pain_df["strike"] == max_pain_strike, "#ffeb3b", "#5e60ce"),
+                        name="Total Pain",
+                    ))
+                    pain_fig.add_vline(x=max_pain_strike, line_dash="dash", line_color="#ffeb3b", annotation_text=f"Max Pain ${max_pain_strike:.0f}")
+                    pain_fig.add_vline(x=last_price, line_dash="dash", line_color="white", annotation_text=f"Current ${last_price:.2f}")
+                    pain_fig.update_layout(template="plotly_dark", height=350, xaxis_title="Strike", yaxis_title="Total Pain ($)", margin=dict(l=0, r=0, t=30, b=0))
+                    st.plotly_chart(pain_fig, use_container_width=True)
+
+                    mp1, mp2, mp3 = st.columns(3)
+                    mp1.metric("Max Pain Strike", f"${max_pain_strike:,.2f}")
+                    mp2.metric("Current Price", f"${last_price:,.2f}")
+                    diff_pct = ((max_pain_strike - last_price) / last_price) * 100
+                    mp3.metric("Distance", f"{diff_pct:+.2f}%")
+            else:
+                st.info("No contracts with significant volume found.")
+        else:
+            st.warning("No option chain data available.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — Watchlist
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_watchlist:
+    st.subheader("Watchlist")
+
+    if "watchlist" not in st.session_state:
+        st.session_state.watchlist = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ", "NVDA"]
+
+    wl_col1, wl_col2 = st.columns([3, 1])
+    new_symbol = wl_col1.text_input("Add ticker to watchlist", key="wl_add").upper().strip()
+    if wl_col2.button("Add", key="wl_add_btn") and new_symbol:
+        if new_symbol not in st.session_state.watchlist:
+            st.session_state.watchlist.append(new_symbol)
+            st.rerun()
+
+    if st.session_state.watchlist:
+        remove_sym = st.selectbox("Remove ticker", [""] + st.session_state.watchlist, key="wl_remove")
+        if remove_sym and st.button("Remove", key="wl_rm_btn"):
+            st.session_state.watchlist.remove(remove_sym)
+            st.rerun()
+
+    st.divider()
+
+    if st.session_state.watchlist:
+        watchlist_data = []
+        symbols_str = ",".join(st.session_state.watchlist)
+        wl_response = api._get("/markets/quotes", {"symbols": symbols_str, "greeks": "false"})
+
+        if wl_response and "quotes" in wl_response and "quote" in wl_response["quotes"]:
+            quotes_list = wl_response["quotes"]["quote"]
+            if isinstance(quotes_list, dict):
+                quotes_list = [quotes_list]
+
+            for q in quotes_list:
+                wl_change = q.get("change", 0) or 0
+                wl_change_pct = q.get("change_percentage", 0) or 0
+                wl_last = q.get("last", q.get("close", 0)) or 0
+                watchlist_data.append({
+                    "Symbol": q.get("symbol", ""),
+                    "Last": f"${wl_last:,.2f}",
+                    "Change": f"{wl_change:+.2f}",
+                    "Change %": f"{wl_change_pct:+.2f}%",
+                    "Volume": f"{q.get('volume', 0) or 0:,.0f}",
+                    "High": f"${q.get('high', 0) or 0:,.2f}",
+                    "Low": f"${q.get('low', 0) or 0:,.2f}",
+                    "52W High": f"${q.get('week_52_high', 0) or 0:,.2f}",
+                    "52W Low": f"${q.get('week_52_low', 0) or 0:,.2f}",
+                })
+
+        if watchlist_data:
+            wl_df = pd.DataFrame(watchlist_data)
+            st.dataframe(wl_df, use_container_width=True, hide_index=True, height=400)
+
+            st.markdown("### Performance Comparison (1M)")
+            perf_fig = go.Figure()
+            for wl_sym in st.session_state.watchlist[:10]:
+                wl_hist = api.get_history(
+                    wl_sym, interval="daily",
+                    start=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"),
+                )
+                if wl_hist is not None and not wl_hist.empty and len(wl_hist) > 1:
+                    base = wl_hist["close"].iloc[0]
+                    normalized = ((wl_hist["close"] / base) - 1) * 100
+                    perf_fig.add_trace(go.Scatter(x=wl_hist["date"], y=normalized, mode="lines", name=wl_sym))
+
+            perf_fig.add_hline(y=0, line_color="white", line_width=0.5)
+            perf_fig.update_layout(
+                template="plotly_dark", height=400,
+                xaxis_title="Date", yaxis_title="Return (%)",
+                margin=dict(l=0, r=0, t=30, b=0),
+                legend=dict(orientation="h", y=1.05, x=0),
+            )
+            st.plotly_chart(perf_fig, use_container_width=True)
+        else:
+            st.warning("Could not fetch watchlist data.")
+    else:
+        st.info("Your watchlist is empty. Add tickers above.")
 
 # ── Footer ───────────────────────────────────────────────────────────────────
 st.divider()
